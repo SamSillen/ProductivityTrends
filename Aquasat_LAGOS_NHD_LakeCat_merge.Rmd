@@ -1,0 +1,259 @@
+---
+title: "Aquasat_LAGOS_NHD_LakeCat_Merge"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Required packages for merging rs data and lagos-us data
+```{r}
+library(tidyverse)
+library(mapview)
+library(sf)
+library(leaflet)
+library(leafgl)
+library(nngeo)
+library(LAGOSUS)
+library(nhdplusTools)
+library(feather)
+
+baseDir <- "C:/Users/A/Dropbox (1)/"
+
+```
+
+#Read in and filter lagos-us data to mountain west states [WY, CO, UT, ID, MT]
+#Read in aquasat and filter to mountain west states, chl-a only
+```{r}
+#lagos
+mt_west_lagos <- read.csv(paste0(baseDir,"/CL_LAGOSUS_exports/LAGOSUS_LOCUS/LOCUS_v1.0/lake_information.csv")) %>%
+  filter(lake_centroidstate == 'WY' | lake_centroidstate == 'CO' | lake_centroidstate == 'ID' | lake_centroidstate == 'MT' | lake_centroidstate == 'UT') %>%
+  st_as_sf(coords=c("lake_lon_decdeg","lake_lat_decdeg"), crs=4326, remove=FALSE)  
+
+#min/max lat longs for aforementioned states
+
+#COLORADO
+co_min_lat = 36.9949
+co_max_lat = 41.0006
+co_min_long = -109.0489
+co_max_long = -102.0424
+#IDAHO
+id_min_lat = 41.9871
+id_max_lat = 49.0018
+id_min_long = -117.2372
+id_max_long = -111.0471
+#MONTANA
+mt_min_lat = 44.3563
+mt_max_lat = 48.9991
+mt_min_long = -116.0458
+mt_max_long = -104.0186
+#UTAH
+ut_min_lat = 36.9982
+ut_max_lat = 41.9993
+ut_min_long = -114.0504
+ut_max_long = -109.0462
+#WYOMING
+wy_min_lat =  40.9986
+wy_max_lat = 44.9988
+wy_max_long =  -104.0556
+wy_min_long = -111.0539
+
+#aquasat
+aquasat_wy <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>%
+   filter(lat >= wy_min_lat & lat <= wy_max_lat) %>% 
+   filter(long >= wy_min_long & long <= wy_max_long) 
+
+aquasat_co <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>% 
+   filter(lat >= co_min_lat & lat <= co_max_lat) %>% 
+   filter(long >= co_min_long & long <= co_max_long) 
+
+aquasat_id <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>%
+   filter(lat >= id_min_lat & lat <= id_max_lat) %>% 
+   filter(long >= id_min_long & long <= id_max_long) 
+
+aquasat_mt <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>% 
+   filter(lat >= mt_min_lat & lat <= mt_max_lat) %>% 
+   filter(long >= mt_min_long & long <= mt_max_long) 
+
+aquasat_ut <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>%
+   filter(lat >= ut_min_lat & lat <= ut_max_lat) %>% 
+   filter(long >= ut_min_long & long <= ut_max_long) 
+
+sf <- rbind(aquasat_wy, aquasat_co, aquasat_id, aquasat_mt, aquasat_ut) %>%
+  drop_na(chl_a) %>%
+  filter(type == 'Lake') 
+
+#Chcek to see if this make sense on a map
+leaflet(data = sf) %>%
+  addTiles() %>%
+  addMarkers(~long, ~lat)
+
+#create sf before joining
+sf <- st_as_sf(sf, coords = c('long', 'lat'), crs = 4326)
+```
+
+#Get COMID's for mountain west lakes from nhd package
+```{r}
+wy_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = wy_min_long, xmax = wy_max_long, ymin = wy_min_lat, ymax = wy_max_lat),
+                      crs = 4326))
+
+wy_comids <- get_waterbodies(AOI = wy_area, id = NULL, t_srs = NULL, buffer = 0.5)
+
+wy_comids <- wy_comids %>%
+  filter(ftype == 'LakePond' | ftype == 'Reservoir')
+
+co_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = co_min_long, xmax = co_max_long, ymin = co_min_lat, ymax = co_max_lat),
+                      crs = 4326))
+
+
+co_comids <- get_waterbodies(AOI = co_area, id = NULL, t_srs = NULL, buffer = 0.5)
+
+co_comids <- co_comids %>%
+  filter(ftype == 'LakePond' | ftype == 'Reservoir')
+
+id_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = id_min_long, xmax = id_max_long, ymin = id_min_lat, ymax = id_max_lat),
+                      crs = 4326))
+
+id_comids <- get_waterbodies(AOI = id_area, id = NULL, t_srs = NULL, buffer = 0.5)
+
+id_comids <- id_comids %>%
+  filter(ftype == 'LakePond' | ftype == 'Reservoir')
+
+mt_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = mt_min_long, xmax = mt_max_long, ymin = mt_min_lat, ymax = mt_max_lat),
+                      crs = 4326))
+
+mt_comids <- get_waterbodies(AOI = mt_area, id = NULL, t_srs = NULL, buffer = 0.5)
+
+mt_comids <- mt_comids %>%
+  filter(ftype == 'LakePond' | ftype == 'Reservoir')
+
+ut_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = ut_min_long, xmax = ut_max_long, ymin = ut_min_lat, ymax = ut_max_lat),
+                      crs = 4326))
+
+ut_comids <- get_waterbodies(AOI = ut_area, id = NULL, t_srs = NULL, buffer = 0.5)
+
+ut_comids <- ut_comids %>%
+    filter(ftype == 'LakePond' | ftype == 'Reservoir')
+
+all_comids <- rbind(wy_comids, co_comids, id_comids, mt_comids, ut_comids)
+
+all_comids <- all_comids %>%
+    st_transform(st_crs(sf))
+
+#Join all_comids to sf
+
+sf <- st_join(sf, all_comids, join = st_nearest_feature) 
+
+```
+
+#Prepare and join lagos data to sf using nhd_reachcode in both dfs
+```{r}
+sf <- sf %>%
+  rename(lake_reachcode = nhd_reachcode)
+
+sf <- as_tibble(sf)
+
+mt_west_lagos <- as_tibble(mt_west_lagos)
+
+mt_west_lagos$lake_reachcode <- as.character(mt_west_lagos$lake_reachcode)
+
+#Join
+sf <- left_join(sf, mt_west_lagos, by = "lake_reachcode")
+
+```
+
+
+#Select relevant fields and add in landuse and climate data
+```{r}
+
+sf <- sf %>%
+  select(SiteID, lagoslakeid, lake_nhdid, lake_reachcode, lake_namegnis, lake_elevation_m, ws_zoneid, hu12_zoneid, bailey_zoneid, blue, blue_sd, date_unity, green, green_sd, nir, nir_sd, path, pixelCount, qa, qa_sd, red, red_sd, row, sat, swir1, swir1_sd, swir2, swir2_sd, date, chl_a, source, clouds, landsat_id, timediff, pwater, comid, lakearea, meandepth, lakevolume, maxdepth, geometry.x)
+
+#Add landuse from 2006
+Landuse <- read.csv(paste0(baseDir, "/CL_LAGOSUS_exports/LAGOSUS_GEO/GEO_EXPORT_BETA_v1/zone_landuse1.csv")) %>%
+  filter(spatial_division == 'ws') %>%
+  filter(year == 2006) 
+
+#Have to rename sf ws_zoneid field to zoneid, convert zoneid field to character because ws_zoneid is a character, necessary to join the two
+
+sf <- sf %>%
+  rename(zoneid = ws_zoneid) %>%
+  mutate(zoneid = as.character(zoneid))
+
+#Add Landuse to sf 
+sf <- left_join(sf, Landuse, by = 'zoneid') 
+
+#Climate 
+climate <- read.csv(paste0(baseDir, '/CL_LAGOSUS_exports/LAGOSUS_GEO/GEO_EXPORT_BETA_v1/zone_climate_norm1.csv')) %>%
+  filter(spatial_division == 'lagoslakeid')
+  #Precip
+climate_ppt <- climate %>%
+  filter(variable_name == 'climate8110norm_ppt_mmperyr') %>%
+  rename(lagoslakeid = zoneid) %>%
+  filter(lagoslakeid %in% sf$lagoslakeid) %>%
+  rename(ppt_mm_yr = value) %>%
+  select(lagoslakeid, ppt_mm_yr)
+
+climate_ppt$lagoslakeid <- as.integer(climate_ppt$lagoslakeid)
+
+sf <- left_join(sf, climate_ppt, by = 'lagoslakeid')
+
+  #Mean temp
+climate_tmean <- climate %>%
+  filter(variable_name == 'climate8110norm_tmean_degc') %>%
+  rename(lagoslakeid = zoneid) %>%
+  filter(lagoslakeid %in% sf$lagoslakeid) %>%
+  rename(tmean = value) %>%
+  select(lagoslakeid, tmean)
+
+climate_tmean$lagoslakeid <- as.integer(climate_tmean$lagoslakeid)
+
+sf <- left_join(sf, climate_tmean, by = 'lagoslakeid')
+
+#dropping rows that don't have LAGOS-US data
+sf <- sf %>%
+  drop_na(lake_elevation_m)
+
+```
+
+#Adding LakeCat data to sf for final df
+```{r}
+sf <- sf %>%
+  rename(COMID = comid)
+
+lakeCat <- tibble(COMID = unique(sf$COMID))  
+
+lc.files <- list.files('C:/Users/A/Dropbox (1)/lakeCat', full.names = TRUE)
+
+for(i in lc.files){
+  if(i == first(lc.files)){
+    lc <- read.csv(i)
+    lakeCat.full <- lakeCat %>%
+      left_join(lc, by ='COMID')}
+  else{
+    lc <- read.csv(i) %>%
+      select(-c(CatAreaSqKm, WsAreaSqKm, CatPctFull,WsPctFull,inStreamCat))
+    lakeCat.full <- lakeCat.full %>%
+      left_join(lc, by = 'COMID')
+  }
+}
+
+round1 <- names(lakeCat.full %>% select(c(CatAreaSqKm:CatPctFull,PctImp2006Cat, PctCarbResidCat:WetIndexCat)))
+
+round.1 <- names(lakeCat.full %>% select(c(AgKffactCat, KffactCat, MineDensCat)))
+
+lakeCat.full <- lakeCat.full %>%
+  mutate_at(round1, round, digits = 0) %>%
+  mutate_at(round.1, round, digits = 1)
+
+lakeCat.shrunk <- lakeCat.full %>%
+  select("COMID", "KffactCat", "NO3_2008Cat",  "RunoffCat", "SlopeCat", "WtDepCat", "WetIndexCat")
+
+sf_final <- left_join(sf, lakeCat.shrunk, by = 'COMID')
+
+write.csv(sf_final,'C:/Users/A/Desktop/lakeCatFull.csv')
+
+```
+
+
