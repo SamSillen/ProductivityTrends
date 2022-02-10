@@ -1,13 +1,12 @@
 ---
-title: "Aquasat_LAGOS_NHD_LakeCat_Merge"
+title: "Aquasat_LAGOS_NHD_LakeCat_Merge: This code creates a training set for prediction of chlorophyll-a and/or categorical predictions (i.e. oligotrophic/mesotrophic/eutrophic). Lake point data (i.e. Aquasat and LAGOS), that do not contain common identifiers, are merged to nhd lake polygons to prevent potential mistakes in spatial joining. This can occur due to clustered lakes and inconsistent lake points. The combined Aquasat/LAGOS/NHD file is merged to lakeCat data by the common identifier "comid". "
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
-#Required packages for merging rs data and lagos-us data
+#Required packages
 ```{r}
 library(tidyverse)
 library(mapview)
@@ -17,74 +16,76 @@ library(leafgl)
 library(nngeo)
 library(LAGOSUS)
 library(nhdplusTools)
-library(feather)
 
 baseDir <- "C:/Users/A/Dropbox (1)/"
 
 ```
 
-#Read in and filter lagos-us data to mountain west states [WY, CO, UT, ID, MT]
-#Read in aquasat and filter to mountain west states, chl-a only
+#Load in LAGOS/Aquasat data and filter it to roi (intermoutnain west states: WY,CO,UT,ID,MT). Filter Aquasat data to only include chl-a data.
 ```{r}
-#lagos
+#lagos mt west states
 mt_west_lagos <- read.csv(paste0(baseDir,"/CL_LAGOSUS_exports/LAGOSUS_LOCUS/LOCUS_v1.0/lake_information.csv")) %>%
   filter(lake_centroidstate == 'WY' | lake_centroidstate == 'CO' | lake_centroidstate == 'ID' | lake_centroidstate == 'MT' | lake_centroidstate == 'UT') %>%
   st_as_sf(coords=c("lake_lon_decdeg","lake_lat_decdeg"), crs=4326, remove=FALSE)  
-
-#min/max lat longs for aforementioned states
+  
+#Aquasat does not include state field, so use min/max lat longs for aforementioned states to filter lat long data. 
 
 #COLORADO
 co_min_lat = 36.9949
 co_max_lat = 41.0006
 co_min_long = -109.0489
 co_max_long = -102.0424
+
+aquasat_co <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>% 
+   filter(lat >= co_min_lat & lat <= co_max_lat) %>% 
+   filter(long >= co_min_long & long <= co_max_long) 
+
 #IDAHO
 id_min_lat = 41.9871
 id_max_lat = 49.0018
 id_min_long = -117.2372
 id_max_long = -111.0471
+
+aquasat_id <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>%
+   filter(lat >= id_min_lat & lat <= id_max_lat) %>% 
+   filter(long >= id_min_long & long <= id_max_long) 
+   
 #MONTANA
 mt_min_lat = 44.3563
 mt_max_lat = 48.9991
 mt_min_long = -116.0458
 mt_max_long = -104.0186
+
+aquasat_mt <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>% 
+   filter(lat >= mt_min_lat & lat <= mt_max_lat) %>% 
+   filter(long >= mt_min_long & long <= mt_max_long) 
+
 #UTAH
 ut_min_lat = 36.9982
 ut_max_lat = 41.9993
 ut_min_long = -114.0504
 ut_max_long = -109.0462
+
+aquasat_ut <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>%
+   filter(lat >= ut_min_lat & lat <= ut_max_lat) %>% 
+   filter(long >= ut_min_long & long <= ut_max_long) 
+
 #WYOMING
 wy_min_lat =  40.9986
 wy_max_lat = 44.9988
 wy_max_long =  -104.0556
 wy_min_long = -111.0539
 
-#aquasat
 aquasat_wy <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>%
    filter(lat >= wy_min_lat & lat <= wy_max_lat) %>% 
    filter(long >= wy_min_long & long <= wy_max_long) 
 
-aquasat_co <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>% 
-   filter(lat >= co_min_lat & lat <= co_max_lat) %>% 
-   filter(long >= co_min_long & long <= co_max_long) 
-
-aquasat_id <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>%
-   filter(lat >= id_min_lat & lat <= id_max_lat) %>% 
-   filter(long >= id_min_long & long <= id_max_long) 
-
-aquasat_mt <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>% 
-   filter(lat >= mt_min_lat & lat <= mt_max_lat) %>% 
-   filter(long >= mt_min_long & long <= mt_max_long) 
-
-aquasat_ut <- read.csv("C:/Users/A/Desktop/aquasat.csv") %>%
-   filter(lat >= ut_min_lat & lat <= ut_max_lat) %>% 
-   filter(long >= ut_min_long & long <= ut_max_long) 
-
+#Bind all state data together
 sf <- rbind(aquasat_wy, aquasat_co, aquasat_id, aquasat_mt, aquasat_ut) %>%
   drop_na(chl_a) %>%
   filter(type == 'Lake') 
 
-#Chcek to see if this make sense on a map
+#Check out spatial distribution of data to see if filtered data makes sense
 leaflet(data = sf) %>%
   addTiles() %>%
   addMarkers(~long, ~lat)
@@ -93,52 +94,39 @@ leaflet(data = sf) %>%
 sf <- st_as_sf(sf, coords = c('long', 'lat'), crs = 4326)
 ```
 
-#Get COMID's for mountain west lakes from nhd package
+#Use nhdtools::getwaterbodies to get the COMIDs for all lakes within these states. Use st_nearest feature to join sf data to nhd polygons.
 ```{r}
 wy_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = wy_min_long, xmax = wy_max_long, ymin = wy_min_lat, ymax = wy_max_lat),
                       crs = 4326))
 
-wy_comids <- get_waterbodies(AOI = wy_area, id = NULL, t_srs = NULL, buffer = 0.5)
-
-wy_comids <- wy_comids %>%
+wy_comids <- get_waterbodies(AOI = wy_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
   filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
 co_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = co_min_long, xmax = co_max_long, ymin = co_min_lat, ymax = co_max_lat),
                       crs = 4326))
 
-
-co_comids <- get_waterbodies(AOI = co_area, id = NULL, t_srs = NULL, buffer = 0.5)
-
-co_comids <- co_comids %>%
+co_comids <- get_waterbodies(AOI = co_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
   filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
 id_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = id_min_long, xmax = id_max_long, ymin = id_min_lat, ymax = id_max_lat),
                       crs = 4326))
 
-id_comids <- get_waterbodies(AOI = id_area, id = NULL, t_srs = NULL, buffer = 0.5)
-
-id_comids <- id_comids %>%
+id_comids <- get_waterbodies(AOI = id_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
   filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
 mt_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = mt_min_long, xmax = mt_max_long, ymin = mt_min_lat, ymax = mt_max_lat),
                       crs = 4326))
 
-mt_comids <- get_waterbodies(AOI = mt_area, id = NULL, t_srs = NULL, buffer = 0.5)
-
-mt_comids <- mt_comids %>%
+mt_comids <- get_waterbodies(AOI = mt_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
   filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
 ut_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = ut_min_long, xmax = ut_max_long, ymin = ut_min_lat, ymax = ut_max_lat),
                       crs = 4326))
 
-ut_comids <- get_waterbodies(AOI = ut_area, id = NULL, t_srs = NULL, buffer = 0.5)
-
-ut_comids <- ut_comids %>%
+ut_comids <- get_waterbodies(AOI = ut_area, id = NULL, t_srs = NULL, buffer = 0.5) ut_comids %>%
     filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
-all_comids <- rbind(wy_comids, co_comids, id_comids, mt_comids, ut_comids)
-
-all_comids <- all_comids %>%
+all_comids <- rbind(wy_comids, co_comids, id_comids, mt_comids, ut_comids) %>%
     st_transform(st_crs(sf))
 
 #Join all_comids to sf
@@ -147,24 +135,17 @@ sf <- st_join(sf, all_comids, join = st_nearest_feature)
 
 ```
 
-#Prepare and join lagos data to sf using nhd_reachcode in both dfs
+#After joining AquaSat to NHD, now join LAGOS to NHD using the same method but retain the polygon geometry so we can then join the SF to LAGOS. 
 ```{r}
-sf <- sf %>%
-  rename(lake_reachcode = nhd_reachcode)
+#having NHD df first will preserve polygon geometry
+NHD_Lagos <- st_join(all_comids, west_lagos, join = st_nearest_feature)
 
-sf <- as_tibble(sf)
-
-mt_west_lagos <- as_tibble(mt_west_lagos)
-
-mt_west_lagos$lake_reachcode <- as.character(mt_west_lagos$lake_reachcode)
-
-#Join
-sf <- left_join(sf, mt_west_lagos, by = "lake_reachcode")
+sf <- st_join(sf, NHD_Lagos, join = st_nearest_feature)
 
 ```
 
 
-#Select relevant fields and add in landuse and climate data
+#Above resulted in some weird field names / duplicates, so just select important vars
 ```{r}
 
 sf <- sf %>%
@@ -176,7 +157,6 @@ Landuse <- read.csv(paste0(baseDir, "/CL_LAGOSUS_exports/LAGOSUS_GEO/GEO_EXPORT_
   filter(year == 2006) 
 
 #Have to rename sf ws_zoneid field to zoneid, convert zoneid field to character because ws_zoneid is a character, necessary to join the two
-
 sf <- sf %>%
   rename(zoneid = ws_zoneid) %>%
   mutate(zoneid = as.character(zoneid))
@@ -184,37 +164,31 @@ sf <- sf %>%
 #Add Landuse to sf 
 sf <- left_join(sf, Landuse, by = 'zoneid') 
 
-#Climate 
+#Add LAGOS monthly hu12 climate data
 climate <- read.csv(paste0(baseDir, '/CL_LAGOSUS_exports/LAGOSUS_GEO/GEO_EXPORT_BETA_v1/zone_climate_norm1.csv')) %>%
-  filter(spatial_division == 'lagoslakeid')
-  #Precip
-climate_ppt <- climate %>%
-  filter(variable_name == 'climate8110norm_ppt_mmperyr') %>%
-  rename(lagoslakeid = zoneid) %>%
-  filter(lagoslakeid %in% sf$lagoslakeid) %>%
-  rename(ppt_mm_yr = value) %>%
-  select(lagoslakeid, ppt_mm_yr)
+  filter(zoneid %in% sf$hu12_zoneid) %>%
+  select(zoneid, year, month, climate_tmean_degc, climate_tmax_degc, climate_ppt_mm)
 
-climate_ppt$lagoslakeid <- as.integer(climate_ppt$lagoslakeid)
+#Add year-month field so we can join to sf  year-month
 
-sf <- left_join(sf, climate_ppt, by = 'lagoslakeid')
+climate <- climate %>% mutate(year_month = ISOdate(climate$year, climate$month, 1))
 
-  #Mean temp
-climate_tmean <- climate %>%
-  filter(variable_name == 'climate8110norm_tmean_degc') %>%
-  rename(lagoslakeid = zoneid) %>%
-  filter(lagoslakeid %in% sf$lagoslakeid) %>%
-  rename(tmean = value) %>%
-  select(lagoslakeid, tmean)
+climate$year_month <- format(climate$year_month, "%Y-%m)
 
-climate_tmean$lagoslakeid <- as.integer(climate_tmean$lagoslakeid)
+climate <- climate %>%
+  rename(hu12_zoneid = "zoneid")
+  
+#Do the same wrangling to sf df
 
-sf <- left_join(sf, climate_tmean, by = 'lagoslakeid')
+#check date format - not necessarily needed
+training$date
+training$date <- ymd(training$date)
+training$year_month <- format(training$date, %Y-%m")
 
-#dropping rows that don't have LAGOS-US data
-sf <- sf %>%
-  drop_na(lake_elevation_m)
+#check
+training$year_month
 
+sf <- left_join(sf, climate, by = c('hu12_zoneid', 'year_month'))
 ```
 
 #Adding LakeCat data to sf for final df
@@ -252,7 +226,7 @@ lakeCat.shrunk <- lakeCat.full %>%
 
 sf_final <- left_join(sf, lakeCat.shrunk, by = 'COMID')
 
-write.csv(sf_final,'C:/Users/A/Desktop/lakeCatFull.csv')
+write.csv(sf_final,'C:/Users/A/Dropbox (1)/sf_training.csv')
 
 ```
 
