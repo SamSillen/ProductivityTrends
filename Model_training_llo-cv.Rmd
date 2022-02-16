@@ -1,0 +1,156 @@
+---
+title: "Model_training_llo-cv"
+author: "S. Sillen"
+date: "2/16/2022"
+output: html_document
+---
+
+#Required packages, set base directory, get ML utilites from Simon code
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(feather)
+library(mapview)
+library(sf)
+library(xgboost)
+library(Hmisc)
+library(leaflet)
+library(leafgl)
+library(kableExtra)
+library(Metrics)
+library(lubridate)
+library(nngeo)
+library(tune)
+library(caret)
+library(CAST)
+library(randomForest)
+
+baseDir <- "C:/Users/samsi/Dropbox/"
+
+source(paste0(baseDir,'Sam_Matt_Collabs/ML_utils.R'))
+
+
+```
+
+#Create train/test splits, create spatial folds, select features (ffs) and evaluate performance
+```{r}
+training <- read.csv("C:/Users/A/Dropbox/training.csv")
+
+#Create band ratios, add land use fields (forest, wetland, development)
+training <- training %>%
+  mutate(dWL = fui.hue(red, green, blue),
+         red_to_blue = red/blue,
+         red_to_nir = red/nir,
+         nir_to_red = nir/red,
+         blue_to_green = blue/green,
+         green_to_blue = green/blue,
+         blue_min_red_ovr_green = (blue-red)/(green),
+         nir_sac = nir-swir1,
+         nir_sac2 = nir-1.03*swir1,
+         nir_min_red = nir-red,
+         log_chla = log10(chl_a),
+         forest = nlcd_forcon42_pct + nlcd_fordec41_pct + nlcd_formix43_pct,
+         development = nlcd_devmed23_pct + nlcd_devhi24_pct + nlcd_devlow22_pct,
+         wetland = nlcd_wetwood90_pct + nlcd_wetemerg95_pct,
+         ndvi = (nir-red)/(red + nir),
+         id = row_number(),
+         mutate(in_situ_cat = cut(training$chl_a, breaks = c(0, 7, 30, 200), labels = c('oligotrophic/mesotrophic', 'eutrophic', 'hypereutrophic'))))
+
+#Change cutoffs if desired (i.e. oligo/meso/eutro -- 0, 2.6, 7, 30)
+
+#Remove these features (We will have to remove all NAs, these have lots of NAs and result in data loss if we drop NAs)
+training <- training %>%
+  select(!c( 'meandepth', 'maxdepth', 'lakevolume', 'lakearea'))
+
+#Remove the lake name field as well (NAs)
+training <- training %>%
+  select(!lake_namegnis)
+
+#Drop NAs
+training <- training %>%
+  drop_na()
+
+#Potential training features
+features <- c("dWL", "red_to_blue", "red_to_nir", "nir_to_red", "blue_to_green", "green_to_blue", "blue_min_red_ovr_green", "nir_sac", "nir_sac2", "nir_min_red", "forest", "development", "nlcd_barren31_pct", "nlcd_shrub52_pct", "nlcd_grass71_pct", "nlcd_past81_pct", "nlcd_cultcrop82_pct", "wetland", "KffactCat", "NO3_2008Cat", "RunoffCat", "SlopeCat", "WtDepCat", "WetIndexCat", "ndvi", "climate_tmax_degc", "climate_ppt_mm", "lake_elevation_m")
+
+target <- 'in_situ_cat'
+
+#Need to do this for the predict function later
+training <- training %>% mutate_if(is.character, as.factor)
+
+#I'm removing everything above 200 ug/l based on the fact that seems unrealistic. Could change this to a lower cutoff or remove cutoff.
+training <- training %>% filter(chl_a <= 200)
+
+#First, sample frac the test set and then select for lakes that aren't in test set for training set. This results in loss of data because of the fact that multiple samples come from individual lakes. I don't really know how to solve this issue. This is not exactly 20:80, also. 
+
+set.seed(100) 
+test <- training %>% sample_frac(0.075)
+
+train <- training %>% filter(!lagoslakeid %in% test$lagoslakeid)
+
+#space folds = lake id. Could also do some other space variable like watershed scale (i.e. hu8)
+
+folds <- CreateSpacetimeFolds(train, spacevar = 'lagoslakeid', k= length(unique(train$lagoslakeid)))
+
+#up sampling because of class imbalances. Takes longer for ffs to run. Might want to use parallel processing. 
+control <- trainControl(method="cv", index = folds$index,  savePredictions = TRUE, sampling = 'up')
+
+
+#ntree = 500 takes forever, can use 50 to speed things up and examine differences between different cutoffs
+model_ffs <- ffs(train[,features],
+               train[,target],
+               method="rf",
+               metric="Accuracy",
+               trControl=control,
+               importance=TRUE,
+               ntree=500)
+
+#Check of feature importance across different classes
+plot(varImp(model_ffs))
+
+#Check out spatial CV performance. 
+cvPredictions <- model_ffs$pred[model_ffs$pred$mtry==model_ffs$bestTune$mtry,]
+
+model_ffs_llo_cv <- confusionMatrix(cvPredictions$pred,cvPredictions$obs)
+
+model_ffs_llo_cv 
+
+
+
+plt <- as.data.frame(model_ffs_llo_cv$table)
+
+plt$Prediction <- factor(plt$Prediction, levels=rev(levels(plt$Prediction)))
+
+#Plot confusion matrix
+ggplot(plt, aes(Prediction,Reference, fill= Freq)) +
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "Leave location out CV 80:20") +
+        scale_x_discrete(labels=c("Oligtrophic/Mesotrophic", "Eutrophic","Hypereutrophic")) +
+        scale_y_discrete(labels=c( "Oligtrophic/Mesotrophic", "Eutrophic", "Hypereutrophic"))
+
+validation <- function(x,y=test){
+confusionMatrix(factor(x,levels=unique(unique(as.character(x),unique(as.character(y$in_situ_cat))))),factor(y$in_situ_cat,unique(unique(as.character(x),unique(as.character(y$in_situ_cat))))))
+}
+
+pred <- predict(model_ffs,test)
+
+val <- validation(pred)
+
+#call val to check out statistics
+val
+
+plt2 <- as.data.frame(val$table)
+
+plt2$Prediction <- factor(plt2$Prediction, levels=rev(levels(plt2$Prediction)))
+
+ggplot(plt2, aes(Prediction,Reference, fill= Freq)) +
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "Leave location out CV 80:20") +
+        scale_x_discrete(labels=c("Hypereutrophic", "Eutrophic", "Oligtrophic/Mesotrohpic")) +
+        scale_y_discrete(labels=c( "Oligtrophic/Mesotrophic", "Eutrophic", "Hypereutrophic"))
+```
+
+
