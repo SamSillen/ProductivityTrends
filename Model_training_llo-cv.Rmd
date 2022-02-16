@@ -35,7 +35,7 @@ source(paste0(baseDir,'Sam_Matt_Collabs/ML_utils.R'))
 
 #Create train/test splits, create spatial folds, select features (ffs) and evaluate performance
 ```{r}
-training <- read.csv("C:/Users/A/Dropbox/training.csv")
+training <- read.csv("C:/Users/samsi/Dropbox/training.csv")
 
 #Create band ratios, add land use fields (forest, wetland, development)
 training <- training %>%
@@ -54,10 +54,15 @@ training <- training %>%
          development = nlcd_devmed23_pct + nlcd_devhi24_pct + nlcd_devlow22_pct,
          wetland = nlcd_wetwood90_pct + nlcd_wetemerg95_pct,
          ndvi = (nir-red)/(red + nir),
-         id = row_number(),
-         mutate(in_situ_cat = cut(training$chl_a, breaks = c(0, 7, 30, 200), labels = c('oligotrophic/mesotrophic', 'eutrophic', 'hypereutrophic'))))
+         id = row_number())
+
+training <- training %>%
+         mutate(in_situ_cat = cut(training$chl_a, breaks = c(0, 7, 30, 200), labels = c('oligotrophic/mesotrophic', 'eutrophic', 'hypereutrophic')))
 
 #Change cutoffs if desired (i.e. oligo/meso/eutro -- 0, 2.6, 7, 30)
+
+training <- training %>%
+  filter(clouds < 50)
 
 #Remove these features (We will have to remove all NAs, these have lots of NAs and result in data loss if we drop NAs)
 training <- training %>%
@@ -79,13 +84,13 @@ target <- 'in_situ_cat'
 #Need to do this for the predict function later
 training <- training %>% mutate_if(is.character, as.factor)
 
-#I'm removing everything above 200 ug/l based on the fact that seems unrealistic. Could change this to a lower cutoff or remove cutoff.
-training <- training %>% filter(chl_a <= 200)
+#I'm removing everything above 100 ug/l based on the fact that seems unrealistic. Could change this to a higher cutoff or remove cutoff.
+training <- training %>% filter(chl_a <= 100)
 
 #First, sample frac the test set and then select for lakes that aren't in test set for training set. This results in loss of data because of the fact that multiple samples come from individual lakes. I don't really know how to solve this issue. This is not exactly 20:80, also. 
 
 set.seed(100) 
-test <- training %>% sample_frac(0.075)
+test <- training %>% sample_frac(0.09)
 
 train <- training %>% filter(!lagoslakeid %in% test$lagoslakeid)
 
@@ -98,13 +103,14 @@ control <- trainControl(method="cv", index = folds$index,  savePredictions = TRU
 
 
 #ntree = 500 takes forever, can use 50 to speed things up and examine differences between different cutoffs
+set.seed(100)
 model_ffs <- ffs(train[,features],
                train[,target],
                method="rf",
                metric="Accuracy",
                trControl=control,
                importance=TRUE,
-               ntree=500)
+               ntree=50)
 
 #Check of feature importance across different classes
 plot(varImp(model_ffs))
@@ -127,7 +133,7 @@ ggplot(plt, aes(Prediction,Reference, fill= Freq)) +
         geom_tile() + geom_text(aes(label=Freq)) +
         scale_fill_gradient(low="white", high="#009194") +
         labs(x = "Reference",y = "Prediction", title = "Leave location out CV 80:20") +
-        scale_x_discrete(labels=c("Oligtrophic/Mesotrophic", "Eutrophic","Hypereutrophic")) +
+        scale_x_discrete(labels=c("Hypereutrophic", "Eutrophic","Oligtrophic/Mesotrophic")) +
         scale_y_discrete(labels=c( "Oligtrophic/Mesotrophic", "Eutrophic", "Hypereutrophic"))
 
 validation <- function(x,y=test){
@@ -151,6 +157,5 @@ ggplot(plt2, aes(Prediction,Reference, fill= Freq)) +
         labs(x = "Reference",y = "Prediction", title = "Leave location out CV 80:20") +
         scale_x_discrete(labels=c("Hypereutrophic", "Eutrophic", "Oligtrophic/Mesotrohpic")) +
         scale_y_discrete(labels=c( "Oligtrophic/Mesotrophic", "Eutrophic", "Hypereutrophic"))
+        
 ```
-
-
