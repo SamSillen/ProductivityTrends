@@ -1,6 +1,6 @@
 ---
-title: "Aquasat_LAGOS_NHD_LakeCat_Merge: This code creates a training set for prediction of chlorophyll-a and/or categorical predictions (i.e. oligotrophic/mesotrophic/eutrophic). Lake point data (i.e. Aquasat and LAGOS), that do not contain common identifiers, are merged to nhd lake polygons to prevent potential mistakes in spatial joining. This can occur due to clustered lakes and inconsistent lake points. The combined Aquasat/LAGOS/NHD file is merged to lakeCat data by the common identifier comid"
-date: 2-11-2022
+title: "Aquasat_LAGOS_NHD_LakeCat_Merge: This code creates a training set for prediction of chlorophyll-a and/or categorical predictions (i.e. oligotrophic/mesotrophic/eutrophic). Lake point data (i.e. Aquasat and LAGOS), that do not contain common identifiers, are merged to nhd lake polygons to prevent potentially incorrect spatial joins. This can occur due to clustered lakes and inconsistent lake points. The combined Aquasat/LAGOS/NHD file is then merged to lakeCat data by the common identifier comid"
+date: 3-30-2022
 author: S.Sillen
 output: html_document
 ---
@@ -11,27 +11,35 @@ knitr::opts_chunk$set(echo = TRUE)
 #Required packages
 ```{r}
 library(tidyverse)
-library(mapview)
 library(lubridate)
 library(sf)
 library(leaflet)
 library(leafgl)
 library(nngeo)
-library(LAGOSUS)
 library(nhdplusTools)
 
 baseDir <- "~/Dropbox (1)"
-
 ```
 
-#Load in LAGOS/Aquasat data and filter it to roi (intermoutnain west states: WY,CO,UT,ID,MT). Filter Aquasat data to only include chl-a data.
+#General outline / workflow 
 ```{r}
-#lagos mt west states
-mt_west_lagos <- read.csv(paste0(baseDir,"/CL_LAGOSUS_exports/LAGOSUS_LOCUS/LOCUS_v1.0/lake_information.csv")) %>%
+## Read in AquaSat and filter to area of interest (aoi) and parameters of interest (chl-a)
+
+## Pull out the nhd waterbodies within the aoi (contains polygon data for joins)
+
+## Use nhd polygon data to join datasets that do not share commmon identifiers together 
+
+## Read in LakeCat variables and join via COMID (shared identifier between NHD and LakeCat)
+ ```
+
+# Load in LAGOS/Aquasat data and filter it to roi (intermoutnain west states: WY,CO,UT,ID,MT). Filter Aquasat data to only include chl-a data.
+```{r}
+
+lagos_aoi <- read.csv(paste0(baseDir,"/CL_LAGOSUS_exports/LAGOSUS_LOCUS/LOCUS_v1.0/lake_information.csv")) %>%
   filter(lake_centroidstate == 'WY' | lake_centroidstate == 'CO' | lake_centroidstate == 'ID' | lake_centroidstate == 'MT' | lake_centroidstate == 'UT') %>%
   st_as_sf(coords=c("lake_lon_decdeg","lake_lat_decdeg"), crs=4326, remove=FALSE)  
   
-#Aquasat does not include state field, so use min/max lat longs for aforementioned states to filter lat long data. 
+#Aquasat does not include state field, so use min/max lat longs for states in aoi to filter lat long data then bind together. 
 
 #COLORADO
 co_min_lat = 36.9949
@@ -83,92 +91,73 @@ aquasat_wy <- read.csv(paste0(baseDir, "/sr_wq_rs_join.csv")) %>%
    filter(lat >= wy_min_lat & lat <= wy_max_lat) %>% 
    filter(long >= wy_min_long & long <= wy_max_long) 
 
-#Bind all state data together
+#bind together
 sf <- rbind(aquasat_wy, aquasat_co, aquasat_id, aquasat_mt, aquasat_ut) %>%
   drop_na(chl_a) %>%
   filter(type == 'Lake') 
 
-#Check out spatial distribution of data to see if filtered data makes sense
-leaflet(data = sf) %>%
-  addTiles() %>%
-  addMarkers(~long, ~lat)
-
-#create sf before joining
 sf <- st_as_sf(sf, coords = c('long', 'lat'), crs = 4326)
 ```
 
-#Use nhdtools::getwaterbodies to get the COMIDs for all lakes within these states. Use st_nearest feature to join sf data to nhd polygons.
+#Use nhdtools::getwaterbodies to get the polygon data for all lakes within the aoi. Use st_nearest feature to join sf data to nhd polygons.
 ```{r}
 wy_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = wy_min_long, xmax = wy_max_long, ymin = wy_min_lat, ymax = wy_max_lat),
                       crs = 4326))
 
-wy_comids <- get_waterbodies(AOI = wy_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
+nhd_wy <- get_waterbodies(AOI = wy_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
   filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
 co_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = co_min_long, xmax = co_max_long, ymin = co_min_lat, ymax = co_max_lat),
                       crs = 4326))
 
-co_comids <- get_waterbodies(AOI = co_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
+nhd_co <- get_waterbodies(AOI = co_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
   filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
 id_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = id_min_long, xmax = id_max_long, ymin = id_min_lat, ymax = id_max_lat),
                       crs = 4326))
 
-id_comids <- get_waterbodies(AOI = id_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
+nhd_id <- get_waterbodies(AOI = id_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
   filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
 mt_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = mt_min_long, xmax = mt_max_long, ymin = mt_min_lat, ymax = mt_max_lat),
                       crs = 4326))
 
-mt_comids <- get_waterbodies(AOI = mt_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
+nhd_mt <- get_waterbodies(AOI = mt_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
   filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
 ut_area <- sf::st_as_sfc(sf::st_bbox(c(xmin = ut_min_long, xmax = ut_max_long, ymin = ut_min_lat, ymax = ut_max_lat),
                       crs = 4326))
 
-ut_comids <- get_waterbodies(AOI = ut_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
+nhd_ut <- get_waterbodies(AOI = ut_area, id = NULL, t_srs = NULL, buffer = 0.5) %>%
     filter(ftype == 'LakePond' | ftype == 'Reservoir')
 
-all_comids <- rbind(wy_comids, co_comids, id_comids, mt_comids, ut_comids) %>%
+nhd_aoi <- rbind(nhd_wy, nhd_co, nhd_id, nhd_mt, nhd_ut) %>%
     st_transform(st_crs(sf))
 
 #Join all_comids to sf
 
-sf <- st_join(sf, all_comids, join = st_nearest_feature) 
+sf <- st_join(sf, nhd_aoi, join = st_nearest_feature) 
 
 ```
 
 #After joining AquaSat to NHD, now join LAGOS to NHD using the same method but retain the polygon geometry so we can then join the SF to LAGOS. 
 ```{r}
 #having NHD df first will preserve polygon geometry
-NHD_Lagos <- st_join(all_comids, mt_west_lagos, join = st_nearest_feature)
+
+NHD_Lagos <- st_join(nhd_aoi, lagos_aoi, join = st_nearest_feature)
 
 sf <- st_join(sf, NHD_Lagos, join = st_nearest_feature)
 
 ```
 
-
-#Above resulted in some weird field names / duplicates, so just select important vars
+#Select relevant vars
 ```{r}
 
 #Also, we will have to ditch all fields that have NAs for our random forest model. Going to have to ditch the lake names, and nhd data (depth, volume). We could also keep depth and drop na's after to see how well the model performs with less data but with depth included as a training feature. 
 
 sf <- sf %>%
-  select(lagoslakeid, ws_zoneid, hu12_zoneid, blue, green, nir, nir_sd, pixelCount,clouds, red, sat, swir1, swir2, date, chl_a, source, landsat_id, pwater, comid.x, lake_lat_decdeg, lake_lon_decdeg, lake_elevation_m) %>%
-  rename(comid = comid.x)
-
-#Add landuse from 2006
-Landuse <- read.csv(paste0(baseDir, "/CL_LAGOSUS_exports/LAGOSUS_GEO/GEO_EXPORT_BETA_v1/zone_landuse1.csv")) %>%
-  filter(spatial_division == 'ws') %>%
-  filter(year == 2006) 
-
-#Have to rename sf ws_zoneid field to zoneid, convert zoneid field to character because ws_zoneid is a character, necessary to join the two
-sf <- sf %>%
-  rename(zoneid = ws_zoneid) %>%
-  mutate(zoneid = as.character(zoneid))
-
-#Add Landuse to sf 
-sf <- left_join(sf, Landuse, by = 'zoneid') 
+  select(lagoslakeid, lake_nhdid, ws_zoneid, hu12_zoneid, blue, green, nir, nir_sd, pixelCount, clouds, red, sat, swir1, swir2, date, chl_a, source, landsat_id, pwater, comid.x, lake_lat_decdeg, lake_lon_decdeg, lake_elevation_m) %>%
+  rename(COMID = comid.x)
 
 #Add LAGOS monthly hu12 climate data
 climate <- read.csv(paste0(baseDir, '/CL_LAGOSUS_exports/LAGOSUS_GEO/GEO_EXPORT_BETA_v1/zone_climate_monthly1.csv')) %>%
@@ -184,7 +173,7 @@ climate$year_month <- format(climate$year_month, "%Y-%m")
 climate <- climate %>%
   rename(hu12_zoneid = "zoneid")
   
-#Do the same wrangling to sf df
+##Do the same wrangling to sf df
 
 #check date format - not necessarily needed
 sf$date
@@ -197,10 +186,8 @@ sf$year_month
 sf <- left_join(sf, climate, by = c('hu12_zoneid', 'year_month'))
 ```
 
-#Adding LakeCat data to sf for final df
+#Adding LakeCat data to sf for final df (https://www.epa.gov/national-aquatic-resource-surveys/lakecat-dataset-0)
 ```{r}
-sf <- sf %>%
-  rename(COMID = comid)
 
 lakeCat <- tibble(COMID = unique(sf$COMID))  
 
@@ -228,9 +215,9 @@ lakeCat.full <- lakeCat.full %>%
   mutate_at(round.1, round, digits = 1)
 
 lakeCat.shrunk <- lakeCat.full %>%
-  select("COMID", "KffactCat", "NO3_2008Cat",  "RunoffCat", "SlopeCat", "WtDepCat", "WetIndexCat")
+  select("ClayCat", "SandCat", "OmCat", "PermCat", "RckdepCat", "BFICat", "CatAreaSqKm", "PctAg2006Slp10Cat", "NPDESDensCat", "HydrlCondCat", "PctImp2006Cat", "KffactCat", "RunoffCat", "WtDepCat", "WetIndexCat", "PctConif2006Cat", "PctMxFst2006Cat", "PctDecid2006Cat", "PctUrbHi2006Cat", "PctUrbMd2006Cat", "PctUrbLo2006Cat", "PctWdWet2006Cat", "PctWdWet2006Cat", "PctCrop2006Cat","NO3_2008Cat")
 
 sf_final <- left_join(sf, lakeCat.shrunk, by = 'COMID')
 
-write.csv(sf_final,'C:/Users/A/Dropbox (1)/sf_training.csv')
+write.csv(sf_final,'C:/Users/A/Dropbox (1)/training.csv")
 ```
