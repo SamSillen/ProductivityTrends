@@ -25,6 +25,18 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```
 
+Packages
+```{r}
+library(tidyverse)
+library(xgboost)
+library(caret)
+library(ggplot2)
+```
+
+
+
+
+
 1) Read in training file ; filter, calculate band ratios, and remove correlated variables 
 ```{r}
 training <- read.csv("C:/Users/samsi/Dropbox/training.csv") 
@@ -100,6 +112,7 @@ target <- 'in_situ_cat'
 #predictor vars
 feats <- c("blue", "dWL", "nir", "swir2", "red_to_blue", "red_to_nir", "nir_to_red", "green_to_blue", "nir_sac", "nir_min_red", "mean_temp_14_day", "wind")
 
+set.seed(1000)
 train <- data %>% sample_frac(0.8)
 
 test <- data %>% 
@@ -172,7 +185,6 @@ test <- test %>%
          trophic_predicted = case_when(trophic_predicted==0~'oligo',
                                        trophic_predicted==1~'mixo',
                                        trophic_predicted==2~'eutro'))
-
 
 cv <- confusionMatrix(factor(test$trophic_predicted),factor(test$in_situ_cat))
 
