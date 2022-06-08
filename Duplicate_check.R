@@ -84,7 +84,7 @@ west_aquasat <- rbind(co_aquasat, id_aquasat, mt_aquasat, ut_aquasat, wy_aquasat
 #Let's make sure
 
 west_aquasat <- west_aquasat %>%
-  select(blue, red, green, date, chl_a, landsat_id)
+  select(blue, red, green, swir1, swir2, nir, date, chl_a, landsat_id)
 
 dups.check.raw <- duplicated_rows(as.data.table(west_aquasat))
 
