@@ -33,10 +33,6 @@ library(caret)
 library(ggplot2)
 ```
 
-
-
-
-
 1) Read in training file ; filter, calculate band ratios, and remove correlated variables 
 ```{r}
 training <- read.csv("C:/Users/samsi/Dropbox/training.csv") 
@@ -60,14 +56,6 @@ training <- training %>%
          nir_sac2 = nir-1.03*swir1,
          nir_min_red = nir-red,
          id = row_number())
-        
-
-#Check for dups
-
-test <- training %>%
-  distinct(blue, red, green, dWL, lagoslakeid, date, chl_a)
-
-#dups exist i guess
 
 #checking for correlated optical vars
 
