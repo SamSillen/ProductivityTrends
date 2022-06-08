@@ -3,14 +3,12 @@
 
 training <- read.csv("C:/Users/samsi/Dropbox/training.csv")
 
-dups.check <- training %>%
+dups.check.training <- training %>%
   select(blue, red, green, swir1, swir2, nir, lagoslakeid, date, chl_a, landsat_id)
 
-dups.check <- data.table(dups.check)
+dups.check.training <- duplicated_rows(as.data.table(dups.check.training))
 
-dups.check <- duplicated_rows(as.data.table(dups.check))
-
-#420 duplicates; to see if these are AquaSat / WQP , I will compare duplicated observations in training file to raw aquasat file 
+#210 plicates; to see if these are AquaSat / WQP , I will compare duplicated observations in training file to raw aquasat file 
 #if they match I will assume these duplicates are a result of data being enetered into WQP more than once. 
 
 raw.aquasat <- read.csv("C:/Users/samsi/Dropbox/sr_wq_rs_join.csv") 
@@ -83,10 +81,19 @@ west_aquasat <- rbind(co_aquasat, id_aquasat, mt_aquasat, ut_aquasat, wy_aquasat
 #suggesting these duplicates came from further upstream #(WQP / Aquasat.) 
 #Let's make sure
 
-west_aquasat <- west_aquasat %>%
+dups.check.AquaSat <- west_aquasat %>%
   select(blue, red, green, swir1, swir2, nir, date, chl_a, landsat_id)
 
-dups.check.raw <- duplicated_rows(as.data.table(west_aquasat))
+dups.check.AquaSat <- duplicated_rows(as.data.table(dups.check.AquaSat))
 
-#There are the same number of duplicated observations for our training file, and
-# and the raw AquaSat file. 
+#The number of duplicates (210) matches to the training file. However, siteID wasn't included in the previous lines. 
+#Possible that the same data was entered twice in the WQP but with different siteIDs.
+
+dups.check.AquaSat.siteID <- west_aquasat %>%
+  select(blue, red, green, swir1, swir2, nir, date, chl_a, landsat_id, SiteID)
+
+dups.check.AquaSat.siteID <- duplicated_rows(as.data.table(dups.check.AquaSat.siteID))
+
+#The number of duplicates (159) is less than before. I think these are instances 
+#where the same data was entered twice but with different siteIDs, based on what I found in Simon's code. 
+#I will think about how to show duplicates but with different siteIDs. 
