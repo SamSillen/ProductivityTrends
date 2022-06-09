@@ -1,0 +1,100 @@
+---
+title: "Trend_analysis"
+author: "S. Sillen"
+date: '2022-06-09'
+output: html_document
+---
+
+#Workflow
+```{r}
+
+# 1) Read in sf file ; filter to summer obs > 3 per year ; determine percetage of trophic state observation per year per lake
+
+# 2) Summarise (average) classes across 2 time frames (1984-2005) (2005-2020)
+
+# 3) Identify no change lakes, lakes trending eutrophic, and lakes trending oligotrophic
+```
+
+1) Read in preds file ; filter to summer obs > 3 per year ; determine percetage of trophic state observation per year per lake
+```{r}
+preds <- read.csv("C:/Users/samsi/Dropbox/preds.csv") %>%
+  mutate(pred = case_when(pred==0~'oligotrophic',
+                                pred==1~'mesotrophic',
+                                pred==2~'eutrophic')) %>%
+  mutate(month = month(date, label = TRUE)) %>%
+  filter(type == 'dp',
+         month %in% c('Jun', 'Jul', 'Aug', 'Sep')) %>%
+  mutate(year = year(date)) %>%
+  group_by(year, lagoslakeid) %>%
+  filter(n() > 3) %>%
+  ungroup()
+
+#create fields for percentages of oligo/meso/eutro per lakeid per year
+
+yearly_obs <- preds %>%
+  group_by(year, lagoslakeid) %>%
+  summarise(total_obs = n()) %>%
+  ungroup()
+
+trophic_states <- c('oligotrophic', 'mesotrophic', 'eutrophic')
+
+for (i in trophic_states) {
+    state <- preds %>%
+      filter(pred == i) %>%
+      group_by(year,lagoslakeid) %>%
+      summarise(count = n())
+    yearly_obs <- left_join(yearly_obs, state, by = c('year', 'lagoslakeid'))
+}
+
+yearly_obs <- yearly_obs %>%
+  mutate_all(funs(replace_na(.,0))) %>%
+  rename(count_oligotrophic = 'count.x',
+         count_mesotrophic = 'count.y',
+         count_eutrophic = 'count') %>%
+  mutate(pct_oligotrophic = (count_oligotrophic / total_obs)*100,
+         pct_mesotrophic = (count_mesotrophic / total_obs)*100,
+         pct_eutrophic = (count_eutrophic / total_obs)*100) 
+```
+
+2) Summarise (average) classes across 2 time frames (1984-2005) (2005-2020)
+```{r}
+
+early <- yearly_obs %>%
+  filter(year < 2005) %>%
+  group_by(lagoslakeid) %>%
+  summarise(early_mean_oligotrophic = mean(pct_oligotrophic), early_mean_mesotrophic = mean(pct_mesotrophic), early_mean_eutrophic = mean(pct_eutrophic))
+
+late <- yearly_obs %>%
+  filter(year > 2005) %>%
+  group_by(lagoslakeid) %>%
+  summarise(late_mean_oligotrophic = mean(pct_oligotrophic), late_mean_mesotrophic = mean(pct_mesotrophic), late_mean_eutrophic = mean(pct_eutrophic))
+
+trends <- left_join(early, late, by = 'lagoslakeid')
+
+trends <- trends %>%
+    mutate(oligotrophic_delta = (late_mean_oligotrophic - early_mean_oligotrophic),
+          mesotrophic_delta = (late_mean_mesotrophic - early_mean_mesotrophic),
+          eutrophic_delta = (late_mean_eutrophic - early_mean_eutrophic))
+```
+
+3) Identify no change lakes, lakes trending eutrophic, and lakes trending oligotrophic
+```{r}
+
+no_change_lakes <- trends %>%
+  filter(oligotrophic_delta < 10 & oligotrophic_delta >-10, 
+         mesotrophic_delta < 10 & mesotrophic_delta > -10, 
+         eutrophic_delta < 10 & eutrophic_delta > -10)
+
+#1220 / 2458 lakes are not chaning (50 % of lakes)
+
+trending_eutrophic <- trends %>%
+  filter(eutrophic_delta > 10, oligotrophic_delta < -10)
+
+#112 / 2458 lakes are trending towards eutrophic states (5%)
+
+trending_oligotrophic <- trends %>%
+  filter(oligotrophic_delta > 10 , eutrophic_delta < - 10)
+
+#434 / 2458 lakes are trending towards oligotrophic states (18%)
+
+```
