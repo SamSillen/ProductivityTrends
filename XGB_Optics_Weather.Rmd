@@ -161,32 +161,53 @@ best_params <- list(booster = "gbtree", objective = 'multi:softmax',
 
 4) Re-train final model with best params , look at evaluation metrics from test data
 ```{r}
-
 final_model <- xgb.train(params = best_params, data = dtrain, nrounds = 2000, 
                          print_every_n = 20, num_class = 3)
 
 test <- test %>%
   mutate(trophic_predicted = predict(final_model, dtest),
-         in_situ_cat = case_when(in_situ_cat ==0~'oligo',
-                                 in_situ_cat==1~'mixo',
-                                 in_situ_cat==2~'eutro'),
-         trophic_predicted = case_when(trophic_predicted==0~'oligo',
-                                       trophic_predicted==1~'mixo',
-                                       trophic_predicted==2~'eutro'))
+         in_situ_cat = case_when(in_situ_cat ==0~'oligotrophic',
+                                 in_situ_cat==1~'mesotrophic',
+                                 in_situ_cat==2~'eutrophic'),
+         trophic_predicted = case_when(trophic_predicted==0~'oligotrophic',
+                                       trophic_predicted==1~'mesotrophic',
+                                       trophic_predicted==2~'eutrophic'))
+
 
 cv <- confusionMatrix(factor(test$trophic_predicted),factor(test$in_situ_cat))
 
-cv
+cv 
 
-plot <- as.data.frame(cv$table)
+model_stats.table <- as.table(cv$byClass) 
+
+model_stats.table <- t(model_stats.table)
+
+colnames(model_stats.table)[1] <- "Eutrophic"
+
+colnames(model_stats.table)[2] <- "Mesotrophic"
+
+colnames(model_stats.table)[3] <- "Oligotrophic"
+
+model_stats.table <- format(model_stats.table, scientific = FALSE, digits = 2)%>%
+  addHtmlTableStyle(css.header = "padding: 10px", css.cell = "padding:3px")
+
+model_stats.table <- htmlTable(model_stats.table)
+
+save_kable(cv, "C:/Users/samsi/Dropbox/WesternMountainsChlPreds/model_stats.html")
+
+plot <- as.data.frame(cv$table) %>%
+  rename(Frequency = "Freq")
 
 plot$Prediction <- factor(plot$Prediction, levels=rev(levels(plot$Prediction)))
 
-ggplot(plot, aes(Prediction,Reference, fill= Freq)) +
-        geom_tile() + geom_text(aes(label=Freq), size = 7) +
-        scale_fill_gradient(low="white", high="#006a4e") +
-        labs(x = "Observed",y = "Predicted", title = "Random CV") +
+loadfonts(device = "win")
+
+ggplot(plot, aes(Prediction,Reference, fill= Frequency)) +
+        geom_tile() + geom_text(aes(label=Frequency), size = 7) +
+        scale_fill_gradient(low="white", high="#006a4e", ) +
+        labs(x = "Observed",y = "Predicted", title = "") +
         scale_x_discrete(labels=c("Oligotrophic", "Mesotrophic", "Eutrophic")) +
-        scale_y_discrete(labels=c( "Eutrophic", "Mesotrophic", "Oligotrophic"))
+        scale_y_discrete(labels=c( "Eutrophic", "Mesotrophic", "Oligotrophic")) +
+        theme(axis.text.x=element_text(size=15, family = 'sans'), axis.text.y = element_text(size=15, family = 'sans'), axis.title.x =               element_text(size=20, face = 'bold', family = 'sans'),axis.title.y = element_text(size=20, face = 'bold', family = 'sans'))
 
 ```
