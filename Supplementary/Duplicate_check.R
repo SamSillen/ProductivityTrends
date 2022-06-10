@@ -90,7 +90,7 @@ dups.check.AquaSat <- duplicated_rows(as.data.table(dups.check.AquaSat))
 #Possible that the same data was entered twice in the WQP but with different siteIDs.
 
 dups.check.AquaSat.siteID <- west_aquasat %>%
-  select(blue, red, green, swir1, swir2, nir, date, chl_a, landsat_id, SiteID)
+  select(blue, red, green, swir1, swir2, nir, date, chl_a, landsat_id, lat, long)
 
 dups.check.AquaSat.siteID <- duplicated_rows(as.data.table(dups.check.AquaSat.siteID))
 

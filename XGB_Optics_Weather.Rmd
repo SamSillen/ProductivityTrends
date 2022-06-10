@@ -31,6 +31,8 @@ library(tidyverse)
 library(xgboost)
 library(caret)
 library(ggplot2)
+library(htmlTable)
+library(extrafont)
 ```
 
 1) Read in training file ; filter, calculate band ratios, and remove correlated variables 
