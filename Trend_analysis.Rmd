@@ -83,18 +83,22 @@ trends <- trends %>%
 no_change_lakes <- trends %>%
   filter(oligotrophic_delta < 10 & oligotrophic_delta >-10, 
          mesotrophic_delta < 10 & mesotrophic_delta > -10, 
-         eutrophic_delta < 10 & eutrophic_delta > -10)
-
-#1220 / 2458 lakes are not chaning (50 % of lakes)
+         eutrophic_delta < 10 & eutrophic_delta > -10) %>%
+  mutate(trend = 'no change')
 
 trending_eutrophic <- trends %>%
-  filter(eutrophic_delta > 10, oligotrophic_delta < -10)
-
-#112 / 2458 lakes are trending towards eutrophic states (5%)
+  filter(eutrophic_delta > 10) %>%
+  mutate(trend = 'worsening')
 
 trending_oligotrophic <- trends %>%
-  filter(oligotrophic_delta > 10 , eutrophic_delta < - 10)
+  filter(oligotrophic_delta > 10 , eutrophic_delta < - 10) %>%
+  mutate(trend = 'improving')
 
-#434 / 2458 lakes are trending towards oligotrophic states (18%)
+trends <- rbind(no_change_lakes, trending_eutrophic, trending_oligotrophic)
 
+write.csv(trends, "C:/Users/samsi/Dropbox/WesternMountainsChlPreds/trends.csv")
 ```
+
+
+
+
