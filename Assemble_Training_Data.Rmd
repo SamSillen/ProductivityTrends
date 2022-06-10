@@ -1,0 +1,132 @@
+---
+title: "Assemble_Training_Data"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Required packages
+```{r}
+library(tidyverse)
+library(mapview)
+library(sf)
+library(leaflet)
+library(leafgl)
+library(nngeo)
+library(nhdplusTools)
+library(tigris)
+
+baseDir <- "C:/Users/samsi/Dropbox/"
+```
+
+Workflow
+```{r}
+
+#1) Read in raw AquaSat file, filter to Intermountain West states through min and max lat longs 
+
+#2) Pull NHD COMIDS from Intermountain West states, join via st_nearest_feature to LAGOS lake charactersitc data then to aquasat roi
+
+#3) Add lakecat vars via COMID
+
+#4) Add weather and lake temp vars
+```
+
+1) Read in raw AquaSat file and LAGOS lake information; filter to Intermountain West states through min and max lat longs 
+```{r}
+
+states <- states(cb = TRUE)
+
+roi <- subset(states, states$NAME == 'Montana' | states$NAME == 'Idaho' | states$NAME == 'Wyoming' | states$NAME == 'Colorado' | states$NAME == 'Utah')
+
+aquasat_raw <- read.csv(paste0(baseDir, "/sr_wq_rs_join.csv")) %>%
+  filter(type == 'Lake') %>%
+  drop_na(chl_a)
+
+aquasat_raw <- st_as_sf(aquasat_raw, coords = c('long', 'lat'), crs = 4326 ) %>%
+  st_transform(aquasat_raw, crs = 4269)
+
+aquasat_roi <- st_join(aquasat_raw, roi, left = FALSE) %>%
+  select(-STATEFP, -STATENS, -AFFGEOID, -GEOID, -STUSPS, -LSAD, -ALAND, -AWATER) 
+
+```
+
+2) Pull NHD COMIDS from Intermountain West states, join to LAGOS lake charactersitc data via st_nearest_feature, join to the aquasat roi via nearest feature
+```{r}
+states <- c('Wyoming', 'Montana', 'Colorado', 'Idaho', 'Utah')
+
+comids_roi <- data.frame()
+
+for (i in states) {
+    geom <- roi %>% 
+      filter(NAME == i)
+    test.1 <- get_waterbodies(AOI = geom, id = NULL, t_srs = NULL, buffer = 0.5) %>%
+      filter(ftype == 'LakePond' | ftype == 'Reservoir')
+    # Using rbind() to append the output of one iteration to the dataframe
+    comids_roi = rbind(comids_roi, test.1)
+}
+
+comids_roi <- comids_roi %>%
+    st_transform(st_crs(aquasat_roi))
+
+lagos_roi <- read.csv(paste0(baseDir,"/CL_LAGOSUS_exports/LAGOSUS_LOCUS/LOCUS_v1.0/lake_information.csv")) %>%
+  filter(lake_centroidstate == 'WY' | lake_centroidstate == 'CO' | lake_centroidstate == 'ID' | lake_centroidstate == 'MT' |  
+         lake_centroidstate == 'UT') %>%
+  st_as_sf(coords=c("lake_lon_decdeg","lake_lat_decdeg"), crs=4326, remove=FALSE)  
+
+lagos_roi <- lagos_roi %>%
+  st_transform(st_crs(aquasat_roi))
+
+lagos_roi <- st_join(comids_roi, lagos_roi, join = st_nearest_feature)
+
+aquasat_roi <- st_join(aquasat_roi, lagos_roi, join = st_nearest_feature) %>%
+  rename(COMID = "comid")
+
+```
+
+
+3) Add LakeCat data to aquasat roi for final df
+```{r}
+lakeCat <- tibble(COMID = unique(aquasat_roi$COMID))  
+
+lakeCat$COMID <- as.double(lakeCat$COMID)
+
+lc.files <- list.files('C:/Users/samsi/Dropbox/lakeCat', full.names = TRUE)
+
+for(i in lc.files){
+  if(i == first(lc.files)){
+    lc <- read.csv(i)
+    lakeCat.full <- lakeCat %>%
+      left_join(lc, by ='COMID')}
+  else{
+    lc <- read.csv(i) %>%
+      select(-c(CatAreaSqKm, WsAreaSqKm, CatPctFull,WsPctFull,inStreamCat))
+    lakeCat.full <- lakeCat.full %>%
+      left_join(lc, by = 'COMID')
+  }
+}
+
+round1 <- names(lakeCat.full %>% select(c(CatAreaSqKm:CatPctFull,PctImp2006Cat, PctCarbResidCat:WetIndexCat)))
+
+round.1 <- names(lakeCat.full %>% select(c(AgKffactCat, KffactCat, MineDensCat)))
+
+lakeCat.full <- lakeCat.full %>%
+  mutate_at(round1, round, digits = 0) %>%
+  mutate_at(round.1, round, digits = 1)
+
+lakeCat.shrunk <- lakeCat.full %>%
+  select("COMID", "Tmean8110Cat", "ClayCat", "OmCat", "PermCat", "RckdepCat", "BFICat", "CatAreaSqKm", "PctAg2006Slp10Cat", "NPDESDensCat", "HydrlCondCat", "PctImp2006Cat", "PctUrbLo2006Cat", "PctUrbMd2006Cat", "PctUrbHi2006Cat", "PctDecid2006Cat", "PctConif2006Cat", "PctMxFst2006Cat", "PctCrop2006Cat", "PctWdWet2006Cat", "PctHbWet2006Cat", "KffactCat", "NO3_2008Cat", "RunoffCat", "WtDepCat", "WetIndexCat")
+
+aquasat_roi$COMID <- as.double(aquasat_roi$COMID)
+
+#remove fields containing na's 
+aquasat_roi <- aquasat_roi %>%
+  select(-doc, -p_sand, -secchi, -tis, -tss, gnis_id, -gnis_name, -areasqkm, -elevation, -reachcode, -ftype, -fcode, -shape_length, -shape_area, -onoffnet, -purpcode, -purpdesc, -meandepth, -maxdepth, -lakevolume, -meandused, -meandcode, -lakearea, -lake_namegnis, -lake_namelagos)
+
+training <- left_join(aquasat_roi, lakeCat.shrunk, by = 'COMID')
+```
+
+
