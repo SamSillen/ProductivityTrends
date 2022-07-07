@@ -12,14 +12,19 @@ knitr::opts_chunk$set(echo = TRUE)
 Required packages
 ```{r}
 library(tidyverse)
-library(mapview)
 library(sf)
-library(leaflet)
-library(leafgl)
 library(nngeo)
 library(nhdplusTools)
 library(tigris)
+<<<<<<< HEAD
   
+=======
+library(ncdf4)
+library(chron)
+library(reshape2)
+library(lubridate)
+
+>>>>>>> 2395ed71d1edabb7dcd9b2b2bea08d21f7f77a50
 baseDir <- "C:/Users/samsi/Dropbox/"
 ```
 
@@ -127,6 +132,180 @@ aquasat_roi <- aquasat_roi %>%
   select(-doc, -p_sand, -secchi, -tis, -tss, gnis_id, -gnis_name, -areasqkm, -elevation, -reachcode, -ftype, -fcode, -shape_length, -shape_area, -onoffnet, -purpcode, -purpdesc, -meandepth, -maxdepth, -lakevolume, -meandused, -meandcode, -lakearea, -lake_namegnis, -lake_namelagos)
 
 training <- left_join(aquasat_roi, lakeCat.shrunk, by = 'COMID')
+
+#remove vars from work environment that are no longer needed
+rm(geom, lagos_roi, lakeCat, lakeCat.full, lakeCat.shrunk, lc, roi, test.1, aquasat_raw, aquasat_roi, comids_roi, )
+
+```
+
+4) Add in lake temperature variables    
+```{r}
+nc_dat <- nc_open(paste0(baseDir, "01_predicted_temp_N24-53_W98-126.nc"))
+
+#retrieve a matrix of the surf temp data 
+
+surf_temp <- ncvar_get(nc_dat, attributes(nc_dat$var)$names[4])
+
+attributes(nc_dat$dim)
+
+nc_siteid <- ncvar_get( nc_dat, attributes(nc_dat$dim)$names[1])
+
+nc_time <- ncvar_get( nc_dat, attributes(nc_dat$dim)$names[3])
+
+print(paste(dim(nc_time), "times and", dim(nc_siteid), "site_ids"))
+
+dimnames(surf_temp) <- list(time = nc_time, siteid = nc_siteid)
+
+surf_temp <- t(surf_temp) #transpose the matrix
+
+#pull out nhdids from surf_temp matrix
+
+site_ids <- as.data.frame(nc_siteid)
+
+#These ids have a prefix of "nhdhr_" that we will have to remove for the timebeing 
+site_ids <- site_ids %>%
+  transform(nc_siteid = str_replace(nc_siteid, "nhdhr_", ""))
+
+# Now dig up nhdids from training/aquasat file
+
+site_ids <- site_ids %>%
+  filter(nc_siteid %in% training$lake_nhdid)
+
+#not a prefect matchup; missing ~ 20 obs, could be because some lakes are too small in training set and aren't included in this temp data ? 
+
+#re_apply the nhdhr prefix
+site_ids$nc_siteid = paste0('nhdhr_', site_ids$nc_siteid)
+
+#Have to create a character string of site_ids included in site_ids (this might be weird and convoluted but it worked for me...)
+
+site_ids <- site_ids %>%
+  mutate(blank = 0 )
+
+site_ids <- pivot_wider(site_ids, names_from = nc_siteid, values_from = blank)
+
+site_ids <- as.character(colnames(site_ids))
+
+#subset surf_temp dataset to include the lakes that are included in the training/aquasat file
+
+surf_temp <- surf_temp[site_ids , ]
+
+df.surf_temp <- as.data.frame(surf_temp)
+
+rm(surf_temp) # remove matrix
+
+df.surf_temp <- tibble::rownames_to_column(df.surf_temp, "siteID")
+
+#Convert time (days from x) to meaningful date field
+
+time <- ncvar_get(nc_dat,"time")
+
+tunits <- ncatt_get(nc_dat,"time","units")
+
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+
+nc_time <- as.data.frame(nc_time)
+
+days <- as_data_frame(chron(time,origin=c(tmonth, tday, tyear))) %>%
+  mutate(number = nc_time$nc_time)
+
+days$number <- as.factor(days$number)
+
+df.surf_temp <- melt(df.surf_temp, id.vars = 1)
+
+df.surf_temp <- df.surf_temp %>%
+  rename(number = "variable", 
+         temp = "value")
+
+df.surf_temp <- left_join(df.surf_temp, days, by = "number") %>%
+  rename(date = 'value')
+
+nc_close(nc_dat)
+
+df.surf_temp$date <- as_date(df.surf_temp$date)
+
+df.surf_temp$date <- ymd(df.surf_temp$date)
+
+df.surf_temp <- df.surf_temp %>%
+  select(-number)
+
+#remove vars
+rm(days, nc_dat, nc_time, tdstr, tunits, tustr)
+
+#Creating date fields
+training$date <- as_date(training$date)
+
+training <- training %>%
+  st_set_geometry(NULL)
+
+training$lake_nhdid = paste0('nhdhr_', training$lake_nhdid)
+
+training <- training %>%
+  rename(WQP_siteID = 'siteID',
+    siteID = 'lake_nhdid')
+
+#daily temp
+training <- left_join(training, df.surf_temp, by = c('siteID', 'date'))
+
+dates <- training %>%
+  select(date, lagoslakeid, siteID) %>%
+  mutate(start_date_7 = date - 7, 
+         start_date_14 = date - 14, 
+         end_date = date)
+
+test_ids <- dates %>%
+  select(lagoslakeid) %>%
+  distinct(lagoslakeid) %>%
+  mutate(blank = 0)
+
+test_ids <- pivot_wider(test_ids, names_from = lagoslakeid, values_from = blank)
+
+test_ids <- as.character(colnames(test_ids))
+
+df <- data.frame()
+
+for (i in test_ids) {
+    lc <- dates %>% 
+      filter(lagoslakeid == i)
+    test.1 <- left_join(df.surf_temp, lc, by = 'siteID') %>%
+      filter(date.x >= start_date_14 & date.x <=end_date) 
+    test.2 <- test.1 %>%
+      group_by(lagoslakeid, end_date) %>%
+      summarise(mean_temp_14_day = mean(temp))
+    # Using rbind() to append the output of one iteration to the dataframe
+    df = rbind(df, test.2)
+}
+
+df <- df %>%
+  select(lagoslakeid, end_date, mean_temp_14_day) %>%
+  rename(date = end_date)
+
+training <- left_join(training, df, by = c('lagoslakeid', 'date'))
+
+df <- data.frame()
+
+for (i in test_ids) {
+    lc <- dates %>% 
+      filter(lagoslakeid == i)
+    test.1 <- left_join(df.surf_temp, lc, by = 'siteID') %>%
+      filter(date.x >= start_date_7 & date.x <=end_date) 
+    test.2 <- test.1 %>%
+      group_by(lagoslakeid, end_date) %>%
+      summarise(mean_temp_7_day = mean(temp))
+    # Using rbind() to append the output of one iteration to the dataframe
+    df = rbind(df, test.2)
+}
+
+df <- df %>%
+  select(lagoslakeid, end_date, mean_temp_7_day) %>%
+  rename(date = end_date)
+
+training <- left_join(training, df, by = c('lagoslakeid', 'date'))
+
+rm(lc, test.1, test.2, df)
 ```
 
 4) Add lake temp variables
@@ -136,6 +315,13 @@ training <- left_join(aquasat_roi, lakeCat.shrunk, by = 'COMID')
 
 
 
+
+```
+
+
+
+
+```{r}
 
 ```
 
