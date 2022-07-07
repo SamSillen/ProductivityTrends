@@ -19,7 +19,7 @@ library(leafgl)
 library(nngeo)
 library(nhdplusTools)
 library(tigris)
-
+  
 baseDir <- "C:/Users/samsi/Dropbox/"
 ```
 
@@ -129,4 +129,13 @@ aquasat_roi <- aquasat_roi %>%
 training <- left_join(aquasat_roi, lakeCat.shrunk, by = 'COMID')
 ```
 
+4) Add lake temp variables
+```{r}
+
+
+
+
+
+
+```
 
