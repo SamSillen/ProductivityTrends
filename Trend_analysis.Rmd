@@ -5,6 +5,13 @@ date: '2022-06-09'
 output: html_document
 ---
 
+#Required Packages
+```{r}
+library(tidyverse)
+library(lubridate)
+```
+
+
 #Workflow
 ```{r}
 
@@ -22,17 +29,34 @@ preds <- read.csv("C:/Users/samsi/Dropbox/preds.csv") %>%
                                 pred==1~'mesotrophic',
                                 pred==2~'eutrophic')) %>%
   mutate(month = month(date, label = TRUE)) %>%
+  mutate(year = as.integer(year)) %>%
   filter(type == 'dp',
          month %in% c('Jun', 'Jul', 'Aug', 'Sep')) %>%
   mutate(year = year(date)) %>%
-  group_by(year, lagoslakeid) %>%
-  filter(n() > 3) %>%
+  group_by(lagoslakeid, year) %>%
+  filter(n() >= 3) %>%
   ungroup()
+
+#Make sure only keeping consecutive observations (i.e. the code above only keeps years where there are three observations per year, but includes gaps; the code below drops all of the lakes with gaps)
+
+df <- preds %>%
+  distinct(lagoslakeid, year)
+
+df <- df %>% 
+  group_by(lagoslakeid) %>% 
+  arrange(year, lagoslakeid) %>%
+  mutate(deltaLag1 = year - lag(year, 1)) 
+
+df <- df %>%
+  filter(deltaLag1 > 1)
+
+preds <- preds %>%
+  filter(!lagoslakeid %in% df$lagoslakeid)
 
 #create fields for percentages of oligo/meso/eutro per lakeid per year
 
 yearly_obs <- preds %>%
-  group_by(year, lagoslakeid) %>%
+  group_by(lagoslakeid, year) %>%
   summarise(total_obs = n()) %>%
   ungroup()
 
@@ -98,7 +122,3 @@ trends <- rbind(no_change_lakes, trending_eutrophic, trending_oligotrophic)
 
 write.csv(trends, "C:/Users/samsi/Dropbox/WesternMountainsChlPreds/trends.csv")
 ```
-
-
-
-
