@@ -5,14 +5,16 @@ date: '2022-06-09'
 output: html_document
 ---
 
-#Required Packages
+Required Packages
 ```{r}
 library(tidyverse)
 library(lubridate)
+library(ggplot2)
+library(ggpubr)
 ```
 
 
-#Workflow
+Workflow
 ```{r}
 
 # 1) Read in sf file ; filter to summer obs > 3 per year ; determine percetage of trophic state observation per year per lake
@@ -80,7 +82,7 @@ yearly_obs <- yearly_obs %>%
          pct_eutrophic = (count_eutrophic / total_obs)*100) 
 ```
 
-2) Summarise (average) classes across 2 time frames (1984-2005) (2005-2020)
+2) Summarise (average) classes across 2 time frames (1984-2005 == 'early') (2005-2020 == 'late')
 ```{r}
 
 early <- yearly_obs %>%
@@ -104,21 +106,108 @@ trends <- trends %>%
 3) Identify no change lakes, lakes trending eutrophic, and lakes trending oligotrophic
 ```{r}
 
-no_change_lakes <- trends %>%
+no_trend <- trends %>%
   filter(oligotrophic_delta < 10 & oligotrophic_delta >-10, 
          mesotrophic_delta < 10 & mesotrophic_delta > -10, 
          eutrophic_delta < 10 & eutrophic_delta > -10) %>%
-  mutate(trend = 'no change')
+  mutate(trend = 'no trend')
 
 trending_eutrophic <- trends %>%
-  filter(eutrophic_delta > 10) %>%
-  mutate(trend = 'worsening')
+  filter(eutrophic_delta > 10, oligotrophic_delta < -10) %>%
+  mutate(trend = 'trending_eutrophic')
 
 trending_oligotrophic <- trends %>%
-  filter(oligotrophic_delta > 10 , eutrophic_delta < - 10) %>%
-  mutate(trend = 'improving')
+  filter(oligotrophic_delta > 10 , eutrophic_delta < 0) %>%
+  mutate(trend = 'trending oligotrophic')
 
-trends <- rbind(no_change_lakes, trending_eutrophic, trending_oligotrophic)
+trends <- rbind(no_trend, trending_eutrophic, trending_oligotrophic)
 
-write.csv(trends, "C:/Users/samsi/Dropbox/WesternMountainsChlPreds/trends.csv")
+write.csv(trends, "C:/Users/samsi/Dropbox/WesternMountainsChlPreds/csvs/trends.csv")
 ```
+
+
+The following code creates Figure 2: Examples of possible trend categories based on the trends in % occurrence of trophic states.  
+```{r}
+#no trend
+
+i.e.no_trend <- no_trend %>%
+  sample_n(1)
+
+i.e.no_trend <- yearly_obs %>%
+  filter(lagoslakeid %in% i.e.no_trend$lagoslakeid) %>%
+  rename(Oligotrophic = "pct_oligotrophic", 
+         Mesotrophic = "pct_mesotrophic",
+          Eutrophic = "pct_eutrophic") %>%
+  pivot_longer(cols = c("Oligotrophic", "Mesotrophic", "Eutrophic"), names_to = "Trophic_State")
+
+i.e.no_trend$Trophic_State <- factor(i.e.no_trend$Trophic_State, levels = c('Eutrophic', "Mesotrophic", "Oligotrophic"))
+
+
+i.e.no_trend_plot <- ggplot(i.e.no_trend, aes(x = year, y = value, fill = Trophic_State)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c( '#7dae38',  '#698c86', '#2158bc')) +
+  labs(title = "A) No trend") +
+  xlab("Year") +
+  ylab("% Occurence") +
+  theme_bw() +
+  theme(legend.title = element_blank(), axis.title = element_text(size = 30), axis.text = element_text(size = 24, color = 'black'), legend.text = element_text(size = 30), title = element_text(size = 30, face = 'bold'))
+
+i.e.no_trend
+# increasing oligotrophic
+
+i.e.trending_oligotrophic <- trending_oligotrophic %>%
+  sample_n(1)
+
+i.e.trending_oligotrophic <- yearly_obs %>%
+  filter(lagoslakeid %in% i.e.trending_oligotrophic$lagoslakeid) %>%
+  rename(Oligotrophic = "pct_oligotrophic", 
+         Mesotrophic = "pct_mesotrophic",
+          Eutrophic = "pct_eutrophic") %>%
+  pivot_longer(cols = c("Oligotrophic", "Mesotrophic", "Eutrophic"), names_to = "Trophic_State")
+
+i.e.trending_oligotrophic$Trophic_State <- factor(i.e.trending_oligotrophic$Trophic_State, levels = c('Eutrophic', "Mesotrophic", "Oligotrophic"))
+
+
+i.e.oligotrophic_plot <- ggplot(i.e.trending_oligotrophic, aes(x = year, y = value, fill = Trophic_State)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c( '#7dae38',  '#698c86', '#2158bc')) +
+  labs(title = "B) Increasing in % Oligotrophic") +
+  xlab("Year") +
+  ylab("% Occurence") +
+  theme_bw() +
+  theme(legend.title = element_blank(), axis.title = element_text(size = 30), axis.text = element_text(size = 24, color = 'black'), legend.text = element_text(size = 30), title = element_text(size = 30, face = 'bold'))
+
+i.e.oligotrophic_plot
+
+# increasing eutrophic
+
+i.e.trending_eutrophic <- trending_eutrophic %>%
+  sample_n(1)
+
+i.e.trending_eutrophic <- yearly_obs %>%
+  filter(lagoslakeid %in% i.e.trending_eutrophic$lagoslakeid) %>%
+  rename(Oligotrophic = "pct_oligotrophic", 
+         Mesotrophic = "pct_mesotrophic",
+          Eutrophic = "pct_eutrophic") %>%
+  pivot_longer(cols = c("Oligotrophic", "Mesotrophic", "Eutrophic"), names_to = "Trophic_State")
+
+i.e.trending_eutrophic$Trophic_State <- factor(i.e.trending_eutrophic$Trophic_State, levels = c('Eutrophic', "Mesotrophic", "Oligotrophic"))
+
+
+i.e.eutrophic_plot <- ggplot(i.e.trending_eutrophic, aes(x = year, y = value, fill = Trophic_State)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c( '#7dae38',  '#698c86', '#2158bc')) +
+  labs(title = "C) Increasing in % Eutrophic") +
+  xlab("Year") +
+  ylab("% Occurence") +
+  theme_bw() +
+  theme(legend.title = element_blank(), axis.title = element_text(size = 30), axis.text = element_text(size = 24, color = 'black'), legend.text = element_text(size = 30), title = element_text(size = 30, face = 'bold'))
+
+i.e.eutrophic_plot
+
+example_trends_plot <- ggarrange(i.e.no_trend_plot, i.e.oligotrophic_plot, i.e.eutrophic_plot)
+
+example_trends_plot
+
+```
+
