@@ -180,22 +180,22 @@ cv <- confusionMatrix(factor(test$trophic_predicted),factor(test$in_situ_cat))
 
 cv 
 
-model_stats.table <- as.table(cv$byClass) 
+#model_stats.table <- as.table(cv$byClass) 
 
-model_stats.table <- t(model_stats.table)
+#model_stats.table <- t(model_stats.table)
 
-colnames(model_stats.table)[1] <- "Eutrophic"
+#colnames(model_stats.table)[1] <- "Eutrophic"
 
-colnames(model_stats.table)[2] <- "Mesotrophic"
+#colnames(model_stats.table)[2] <- "Mesotrophic"
 
-colnames(model_stats.table)[3] <- "Oligotrophic"
+#colnames(model_stats.table)[3] <- "Oligotrophic"
 
-model_stats.table <- format(model_stats.table, scientific = FALSE, digits = 2)%>%
-  addHtmlTableStyle(css.header = "padding: 10px", css.cell = "padding:3px")
+#model_stats.table <- format(model_stats.table, scientific = FALSE, digits = 2)%>%
+#  addHtmlTableStyle(css.header = "padding: 10px", css.cell = "padding:3px")
 
-model_stats.table <- htmlTable(model_stats.table)
+#model_stats.table <- htmlTable(model_stats.table)
 
-save_kable(cv, "C:/Users/samsi/Dropbox/WesternMountainsChlPreds/model_stats.html")
+#save_kable(cv, "C:/Users/samsi/Dropbox/WesternMountainsChlPreds/model_stats.html")
 
 plot <- as.data.frame(cv$table) %>%
   rename(Frequency = "Freq")
