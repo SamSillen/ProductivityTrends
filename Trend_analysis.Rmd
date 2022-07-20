@@ -117,7 +117,7 @@ trending_eutrophic <- trends %>%
   mutate(trend = 'trending_eutrophic')
 
 trending_oligotrophic <- trends %>%
-  filter(oligotrophic_delta > 10 , eutrophic_delta < 0) %>%
+  filter(oligotrophic_delta > 10 , eutrophic_delta < -10) %>%
   mutate(trend = 'trending oligotrophic')
 
 trends <- rbind(no_trend, trending_eutrophic, trending_oligotrophic)
