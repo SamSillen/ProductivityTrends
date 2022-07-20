@@ -37,7 +37,7 @@ library(extrafont)
 
 1) Read in training file ; filter, calculate band ratios, and remove correlated variables 
 ```{r}
-training <- read.csv("C:/Users/samsi/Dropbox/training.csv") 
+training <- read.csv("C:/Users/samsi/Dropbox/WesternMountainsChlPreds/csvs/training.csv") 
 
 baseDir <- "C:/Users/samsi/Dropbox/"
 
@@ -205,11 +205,12 @@ plot$Prediction <- factor(plot$Prediction, levels=rev(levels(plot$Prediction)))
 loadfonts(device = "win")
 
 ggplot(plot, aes(Prediction,Reference, fill= Frequency)) +
-        geom_tile() + geom_text(aes(label=Frequency), size = 7) +
-        scale_fill_gradient(low="white", high="#006a4e", ) +
+        geom_tile() + geom_text(aes(label=Frequency), size = 10) +
+        scale_fill_gradient(low="white", high="#2158bc", ) +
         labs(x = "Observed",y = "Predicted", title = "") +
         scale_x_discrete(labels=c("Oligotrophic", "Mesotrophic", "Eutrophic")) +
         scale_y_discrete(labels=c( "Eutrophic", "Mesotrophic", "Oligotrophic")) +
-        theme(axis.text.x=element_text(size=15, family = 'sans'), axis.text.y = element_text(size=15, family = 'sans'), axis.title.x =               element_text(size=20, face = 'bold', family = 'sans'),axis.title.y = element_text(size=20, face = 'bold', family = 'sans'))
+        theme_bw() +
+        theme(axis.text.x=element_text(size=15, family = 'sans'), axis.text.y = element_text(size=15, family = 'sans'), axis.title.x =               element_text(size=20, face = 'bold', family = 'sans'),axis.title.y = element_text(size=20, face = 'bold', family = 'sans')) 
 
 ```
