@@ -16,15 +16,11 @@ library(sf)
 library(nngeo)
 library(nhdplusTools)
 library(tigris)
-<<<<<<< HEAD
-  
-=======
 library(ncdf4)
 library(chron)
 library(reshape2)
 library(lubridate)
 
->>>>>>> 2395ed71d1edabb7dcd9b2b2bea08d21f7f77a50
 baseDir <- "C:/Users/samsi/Dropbox/"
 ```
 
@@ -305,23 +301,5 @@ df <- df %>%
 
 training <- left_join(training, df, by = c('lagoslakeid', 'date'))
 
-rm(lc, test.1, test.2, df)
+write.csv(training, "C:/Users/samsi/Dropbox/WesternMountainsChlPreds/csvs/training.csv")
 ```
-
-4) Add lake temp variables
-```{r}
-
-
-
-
-
-
-```
-
-
-
-
-```{r}
-
-```
-
