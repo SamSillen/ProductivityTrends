@@ -211,6 +211,14 @@ ggplot(plot, aes(Prediction,Reference, fill= Frequency)) +
         scale_x_discrete(labels=c("Oligotrophic", "Mesotrophic", "Eutrophic")) +
         scale_y_discrete(labels=c( "Eutrophic", "Mesotrophic", "Oligotrophic")) +
         theme_bw() +
-        theme(axis.text.x=element_text(size=15, family = 'sans'), axis.text.y = element_text(size=15, family = 'sans'), axis.title.x =               element_text(size=20, face = 'bold', family = 'sans'),axis.title.y = element_text(size=20, face = 'bold', family = 'sans')) 
+        theme(axis.text.x=element_text(size=15, colour = 'black'),panel.grid.minor = element_blank(), panel.grid.major = element_blank(), axis.text.y = element_text(size=15,colour = 'black'), axis.title.x =     element_text(size=20, face = 'bold'),axis.title.y = element_text(size=20, face = 'bold'), legend.title = element_text(size = 15), legend.text = element_text(size = 15)) 
 
 ```
+
+#Explore feature importance
+```{r}
+imp <- xgb.importance(model = final_model)
+
+xgb.plot.importance(importance_matrix = imp)
+```
+
