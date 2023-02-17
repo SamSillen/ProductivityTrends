@@ -362,11 +362,11 @@ wind_speed <- wind_speed %>%
 
 wind_speed$date <- as_date(wind_speed$date)
 
-wind_speed <- wind_speed %>% 
-  select(-weatherID)
+#wind_speed <- wind_speed %>% 
+#  select(-weatherID)
 
-wind_speed <- wind_speed %>% distinct(siteID, .keep_all = TRUE)
-
+wind_speed <- wind_speed %>% select(siteID, date, wind) %>%
+  distinct(siteID, date, .keep_all = TRUE)
 
 training$date <- as_date(training$date)
 
