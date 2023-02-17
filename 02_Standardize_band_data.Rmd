@@ -1,0 +1,114 @@
+---
+title: "standarize"
+author: "S. Sillen"
+date: '2023-02-17'
+output: html_document
+---
+
+Required packages
+```{r}
+library(tidyverse)
+library(lubridate)
+library(colorscience)
+
+source("C:/Users/samsi/Desktop/WesternMountainsChlPreds-main/ML_utils.R")
+```
+
+
+```{r}
+
+training<- read.csv("C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/training.csv")
+
+training.std <- training %>%
+  mutate(dWL = fui.hue(red, green, blue),
+         date = ymd(date),
+         year = year(date),
+         sat = factor(sat, levels = c(5,7,8), labels = c('l5','l7','l8')),
+         source = 'NLA') %>%
+  select(year, blue, red, green, nir, dWL, sat, source, COMID)
+
+
+## Create functions for calculating the polynomial regression equation
+lm8 <- function(band, x){
+  x <- x %>% filter(year > 2012, source == 'NLA')
+  df <- tibble(l7 = quantile(x %>% filter(sat == 'l7') %>% .[,band], 
+                             seq(.01,.99, .01)), 
+               l8 = quantile(x %>% filter(sat == 'l8') %>% .[,band], 
+                             seq(.01,.99, .01)))
+  lm <- lm(l7~poly(l8, 2), data = df)
+  #lut <- tibble(quantile = names(lm$fitted.values), value = lm$fitted.values)
+  return(lm)
+}
+lm5 <- function(band, x){
+  x <- x %>% filter(year > 1999, year < 2012, source == 'NLA') 
+  df <- tibble(l7 = quantile(x %>% filter(sat == 'l7') %>% .[,band], 
+                             seq(.01,.99, .01)), 
+               l5 = quantile(x %>% filter(sat == 'l5') %>% .[,band], 
+                             seq(.01,.99, .01)))
+  lm <- lm(l7~poly(l5, 2), data = df)
+  return(lm)
+}
+##Check out the resulting corrections a little
+## Function for plotting up the resutls
+correctionPlot <- function(band, sat){
+  if(sat == 'l8'){
+    x <- refCompPre %>% filter(source == 'NLA', year > 2012)
+    }else if(sat == 'l5'){
+      x <- refCompPre %>% filter(source == 'NLA', year > 1999, year < 2012)
+    }
+  max.x <- max(x[,band])
+  df <- tibble(y = quantile(x %>% filter(sat == 'l7') %>% .[,band], 
+                               seq(.01,.99, .01)), 
+               x = quantile(x %>% filter(sat == sat) %>% .[,band], 
+                               seq(.01,.99, .01)))
+  lm <- lm(y~poly(x, 2), data = df)
+  r2 <- summary(lm)$adj.r.squared %>% round(4)
+  
+  df <- df %>% bind_cols(Corrected = lm$fitted.values) %>%
+    gather(x, Corrected, key = 'Reflectance', value = x) %>%
+    mutate(Reflectance = ifelse(Reflectance == 'x', 'Original', Reflectance))
+}
+  
+  
+
+bands <- tibble(band = c('blue', 'green', 'nir', 'red')) 
+funcs.8 <- bands %>%
+  mutate(lm8 = purrr::map(band, lm8, x = training.std))
+funcs.5 <- bands %>%
+  mutate(lm5 = purrr::map(band, lm5, x = training.std))
+
+training.std <- training.std %>%
+  mutate(uniqueID = row_number())
+
+refCompPost <- training.std %>%
+  mutate(uniqueID = row_number()) %>%
+  select(uniqueID, blue:nir, sat) %>%
+  gather(blue:nir, key = 'band' , value = 'value') %>%
+  spread(sat, value) %>%
+  group_by(band) %>%
+  nest() %>%
+  left_join(funcs.8) %>%
+  left_join(funcs.5) %>%
+  mutate(pred8 = map2(lm8, data, predict),
+         pred5 = map2(lm5, data, predict)) %>%
+  select(-c(lm8,lm5)) %>%
+  unnest(c(data, pred8, pred5)) %>%
+  select(-c(l8,l5)) %>%
+  rename(l8 = pred8, l5 = pred5) %>% gather(l5,l7,l8, key = 'sat', value = 'value') %>%
+  spread(band, value) %>%
+  na.omit() 
+
+refCompPost <- refCompPost %>%
+ rename(blue.std = "blue", red.std = "red", green.std = "green", nir.std = "nir") 
+
+training <- training %>%
+  mutate('uniqueID' = row_number())
+
+training <- left_join(training, refCompPost,by = 'uniqueID')
+
+write.csv(training, "C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/trainnig_std.csv")
+```  
+
+
+
+

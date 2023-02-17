@@ -370,9 +370,10 @@ wind_speed <- wind_speed %>% select(siteID, date, wind) %>%
 
 training$date <- as_date(training$date)
 
-training <- left_join(training, wind_speed, by = c('siteID', 'date'))
+training <- left_join(training, wind_speed, by = c('siteID', 'date')) %>% 
+  select(-geometry.y) # Clean up by removing geometry column
 
-write.csv(training, "C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/training.csv")
+write.csv(training, "C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/training.csv", row.names  = FALSE)
 
 ```
 
