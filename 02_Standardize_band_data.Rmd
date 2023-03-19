@@ -5,108 +5,244 @@ date: '2023-02-17'
 output: html_document
 ---
 
-Required packages
+1) Required packages
 ```{r}
 library(tidyverse)
 library(lubridate)
 library(colorscience)
-
+library(broom)
 source("C:/Users/samsi/Desktop/WesternMountainsChlPreds-main/ML_utils.R")
 ```
 
 
+2) Get correction coefficients 
 ```{r}
 
-training<- read.csv("C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/training.csv")
+data <- read.csv("C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/sr_wq_rs_join.csv") %>% 
+  mutate(year = year(date)) %>% 
+  group_by(SiteID) %>%
+  mutate(count =n(),
+                  max_year=max(year, na.rm=T),
+                  min_year = min(year, na.rm=T),
+                  n_years = (max_year - min_year)) %>%
+                  ungroup()
 
-training.std <- training %>%
-  mutate(dWL = fui.hue(red, green, blue),
-         date = ymd(date),
-         year = year(date),
-         sat = factor(sat, levels = c(5,7,8), labels = c('l5','l7','l8')),
-         source = 'NLA') %>%
-  select(year, blue, red, green, nir, dWL, sat, source, COMID)
+data$sat <- as.character(data$sat)
 
+# bands are quite different but dw is not 
+sr_57 <- data %>%
+  filter(sat %in% c("7", "5")) %>%
+  filter(date > "1999-01-01" & date < "2012-05-01") %>%
+  # filter to site with enough data
+  filter(n_years > 10) %>%
+  select(SiteID, date, sat, count, n_years, blue, red, green, nir, swir1, swir2) %>%
+  gather(blue:swir2, green, key='band', value='value') 
 
-## Create functions for calculating the polynomial regression equation
-lm8 <- function(band, x){
-  x <- x %>% filter(year > 2012, source == 'NLA')
-  df <- tibble(l7 = quantile(x %>% filter(sat == 'l7') %>% .[,band], 
-                             seq(.01,.99, .01)), 
-               l8 = quantile(x %>% filter(sat == 'l8') %>% .[,band], 
-                             seq(.01,.99, .01)))
-  lm <- lm(l7~poly(l8, 2), data = df)
-  #lut <- tibble(quantile = names(lm$fitted.values), value = lm$fitted.values)
-  return(lm)
-}
-lm5 <- function(band, x){
-  x <- x %>% filter(year > 1999, year < 2012, source == 'NLA') 
-  df <- tibble(l7 = quantile(x %>% filter(sat == 'l7') %>% .[,band], 
-                             seq(.01,.99, .01)), 
-               l5 = quantile(x %>% filter(sat == 'l5') %>% .[,band], 
-                             seq(.01,.99, .01)))
-  lm <- lm(l7~poly(l5, 2), data = df)
-  return(lm)
-}
-##Check out the resulting corrections a little
-## Function for plotting up the resutls
-correctionPlot <- function(band, sat){
-  if(sat == 'l8'){
-    x <- refCompPre %>% filter(source == 'NLA', year > 2012)
-    }else if(sat == 'l5'){
-      x <- refCompPre %>% filter(source == 'NLA', year > 1999, year < 2012)
-    }
-  max.x <- max(x[,band])
-  df <- tibble(y = quantile(x %>% filter(sat == 'l7') %>% .[,band], 
-                               seq(.01,.99, .01)), 
-               x = quantile(x %>% filter(sat == sat) %>% .[,band], 
-                               seq(.01,.99, .01)))
-  lm <- lm(y~poly(x, 2), data = df)
-  r2 <- summary(lm)$adj.r.squared %>% round(4)
-  
-  df <- df %>% bind_cols(Corrected = lm$fitted.values) %>%
-    gather(x, Corrected, key = 'Reflectance', value = x) %>%
-    mutate(Reflectance = ifelse(Reflectance == 'x', 'Original', Reflectance))
-}
-  
-  
-
-bands <- tibble(band = c('blue', 'green', 'nir', 'red')) 
-funcs.8 <- bands %>%
-  mutate(lm8 = purrr::map(band, lm8, x = training.std))
-funcs.5 <- bands %>%
-  mutate(lm5 = purrr::map(band, lm5, x = training.std))
-
-training.std <- training.std %>%
-  mutate(uniqueID = row_number())
-
-refCompPost <- training.std %>%
-  mutate(uniqueID = row_number()) %>%
-  select(uniqueID, blue:nir, sat) %>%
-  gather(blue:nir, key = 'band' , value = 'value') %>%
-  spread(sat, value) %>%
+# do ranking plotting percentiles, joining, and correcting
+sr_57_rank  <- sr_57 %>%
+  droplevels() %>%
+  filter(sat =="5") %>%
   group_by(band) %>%
   nest() %>%
-  left_join(funcs.8) %>%
-  left_join(funcs.5) %>%
-  mutate(pred8 = map2(lm8, data, predict),
-         pred5 = map2(lm5, data, predict)) %>%
-  select(-c(lm8,lm5)) %>%
-  unnest(c(data, pred8, pred5)) %>%
-  select(-c(l8,l5)) %>%
-  rename(l8 = pred8, l5 = pred5) %>% gather(l5,l7,l8, key = 'sat', value = 'value') %>%
-  spread(band, value) %>%
-  na.omit() 
+  mutate( ret = purrr::map(data, ~quantile(.$value, probs = seq(0,1,0.01))),
+          ret = purrr::invoke_map(tibble, ret)) %>%
+  unnest(ret) %>%
+  dplyr::select(-data) %>%
+  pivot_longer(
+    cols= contains("%")
+  ) %>%
+  mutate(quant = parse_number(name)/100) %>%
+  rename(value_5 = value) %>%
+  inner_join(sr_57 %>%
+               droplevels() %>%
+               filter(sat =="7") %>%
+               group_by(band) %>%
+               nest() %>%
+               mutate( ret = purrr::map(data, ~quantile(.$value, probs = seq(0,1,0.01))),
+                       ret = purrr::invoke_map(tibble, ret)) %>%
+               unnest(ret) %>%
+               dplyr::select(-data) %>%
+               pivot_longer(
+                 cols= contains("%")
+               ) %>%
+               mutate(quant = parse_number(name)/100) %>%
+               rename(value_7 = value) %>%
+               dplyr::select(-name),
+             by=c("band", "quant")) 
 
-refCompPost <- refCompPost %>%
- rename(blue.std = "blue", red.std = "red", green.std = "green", nir.std = "nir") 
+poly_5_trunc <- function(df){
+  lm(value_7 ~ poly(value_5, 2, raw=T), data = df %>%
+       filter(!quant %in% c(0, 1))  )
+}
+poly_5_all <- function(df){
+  lm(value_7 ~ poly(value_5, 2, raw=T), data = df)
+}
 
-training <- training %>%
-  mutate('uniqueID' = row_number())
+## polynomial correction fit
+poly_57 <- sr_57_rank %>%
+  ungroup() %>%
+#  filter(band != "dw") %>%
+  nest(-band) %>%
+  mutate( model = purrr::map(data, poly_5_trunc)) %>%
+  mutate( model_all = purrr::map(data, poly_5_all)) %>%
+  mutate( pred = purrr::map2(model, data, predict)) %>%
+  mutate( pred_all = purrr::map2(model_all, data, predict)) %>%
+  unnest(c(pred, pred_all, data))  %>%
+  dplyr::select(-model, -model_all)
 
-training <- left_join(training, refCompPost,by = 'uniqueID')
+ggplot(poly_57) +
+   geom_point( aes(x=value_5, y= value_7))+
+   geom_point( aes(x=pred_all, y= value_7), color="red", alpha=0.5)+
+   geom_point( aes(x=pred, y= value_7), color="blue", alpha=0.5)+
+   geom_abline(aes(slope=1, intercept=0)) +
+   facet_wrap(~band, scales="free") +
+  theme_bw() 
 
-write.csv(training, "C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/trainnig_std.csv")
+
+coef_5 <- sr_57_rank %>%
+  ungroup() %>%
+#  filter(band != "dw") %>%
+  filter(!quant %in% c(0, 1)) %>%
+  group_by(band)  %>%
+  nest() %>%
+  mutate( model = purrr::map(data, ~lm(value_7 ~ poly(value_5, 2, raw=T), data = .) %>%
+                               tidy %>%
+                               dplyr::select(term, estimate) %>%
+                               spread(term, estimate))) %>%
+  unnest(model) %>%
+  dplyr::select(-data) %>%
+  rename(band= 1, intercept=2, coef1=3, coef2=4 )  %>%
+  mutate(sat = "5") %>%
+  mutate(fit = "98_quant")
+
+coef_5_all <- sr_57_rank %>%
+  ungroup() %>%
+  #  filter(band != "dw") %>%
+  group_by(band)  %>%
+  nest() %>%
+  mutate( model = purrr::map(data, ~lm(value_7 ~ poly(value_5, 2, raw=T), data = .) %>%
+                               tidy %>%
+                               dplyr::select(term, estimate) %>%
+                               spread(term, estimate))) %>%
+  unnest(model) %>%
+  dplyr::select(-data) %>%
+  rename(band= 1, intercept=2, coef1=3, coef2=4 )  %>%
+  mutate(sat = "5") %>%
+  mutate(fit = "all_quant")
+
+########################
+
+sr_78 <- data %>%
+  filter(sat %in% c("7", "8")) %>%
+  filter(date > "2013-04-11" ) %>%
+  # filter to site with enough data
+  filter(n_years > 10) %>%
+  select(SiteID, date, sat, count, n_years, blue, red, green, nir, swir1, swir2) %>%
+  gather(blue:swir2, key='band', value='value') 
+
+# plot distribution compare means
+# ggplot(data=sr_78, aes(x=value, color=sat)) +
+#   geom_density() +
+#   facet_wrap(~band, scales="free")
+
+# do ranking plotting percentiles, joining, and correcting
+sr_78_rank  <- sr_78 %>%
+  droplevels() %>%
+  filter(sat =="8") %>%
+  group_by(band) %>%
+  nest() %>%
+  mutate( ret = purrr::map(data, ~quantile(.$value, probs = seq(0,1,0.01))),
+          ret = purrr::invoke_map(tibble, ret)) %>%
+  unnest(ret) %>%
+  dplyr::select(-data) %>%
+  pivot_longer(
+    cols= contains("%")
+  ) %>%
+  mutate(quant = parse_number(name)/100) %>%
+  rename(value_8 = value) %>%
+  inner_join(sr_78 %>%
+               droplevels() %>%
+               filter(sat =="7") %>%
+               group_by(band) %>%
+               nest() %>%
+               mutate( ret = purrr::map(data, ~quantile(.$value, probs = seq(0,1,0.01))),
+                       ret = purrr::invoke_map(tibble, ret)) %>%
+               unnest(ret) %>%
+               dplyr::select(-data) %>%
+               pivot_longer(
+                 cols= contains("%")
+               ) %>%
+               mutate(quant = parse_number(name)/100) %>%
+               rename(value_7 = value) %>%
+               dplyr::select(-name),
+             by=c("band", "quant"))  
+
+
+poly_8_trunc <- function(df){
+  lm(value_7 ~ poly(value_8, 2), data = df %>%
+       filter(!quant %in% c(0, 1))  )
+}
+poly_8_all <- function(df){
+  lm(value_7 ~ poly(value_8, 2), data = df)
+}
+
+poly_78 <- sr_78_rank %>%
+  ungroup() %>%
+#  filter(band != "dw") %>%
+  nest(-band) %>%
+  mutate( model = purrr::map(data, poly_8_trunc)) %>%
+  mutate( model_all = purrr::map(data, poly_8_all)) %>%
+  mutate( pred = purrr::map2(model, data, predict)) %>%
+  mutate( pred_all = purrr::map2(model_all, data, predict)) %>%
+  unnest(c(pred, pred_all, data)) %>%
+  dplyr::select(-model, -model_all)
+
+ggplot(poly_78) +
+  geom_point( aes(x=value_8, y= value_7))+
+  geom_point( aes(x=pred_all, y= value_7), color="red", alpha=0.5)+
+  geom_point( aes(x=pred, y= value_7), color="blue", alpha=0.5)+
+  geom_abline(aes(slope=1, intercept=0)) +
+  facet_wrap(~band, scales="free") +
+  theme_bw()
+dev.off()
+
+coef_8 <- sr_78_rank %>%
+  ungroup() %>%
+  filter(!quant %in% c(0, 1)) %>%
+  group_by(band)  %>%
+  nest() %>%
+  mutate( model = purrr::map(data, ~lm(value_7 ~ poly(value_8, 2, raw=T), data = .) %>%
+                               tidy %>%
+                               dplyr::select(term, estimate) %>%
+                               spread(term, estimate))) %>%
+  unnest(model) %>%
+  dplyr::select(-data) %>%
+  rename(band= 1, intercept=2, coef1=3, coef2=4 )  %>%
+  mutate(sat = "8") %>%
+  mutate(fit = "98_quant")
+
+#
+coef_8_all <- sr_78_rank %>%
+  ungroup() %>%
+  group_by(band)  %>%
+  nest() %>%
+  mutate( model = purrr::map(data, ~lm(value_7 ~ poly(value_8, 2, raw=T), data = .) %>%
+                               tidy %>%
+                               dplyr::select(term, estimate) %>%
+                               spread(term, estimate))) %>%
+  unnest(model) %>%
+  dplyr::select(-data) %>%
+  rename(band= 1, intercept=2, coef1=3, coef2=4 )  %>%
+  mutate(sat = "8") %>%
+  mutate(fit = "all_quant")
+
+coef_7 <- tibble(band = c("blue", "red", "green", "nir", "swir1", "swir2"), intercept = 0, coef1=1, coef2=0, sat= "LE07")
+
+#
+corr_coef <- bind_rows(coef_5, coef_7, coef_8, coef_5_all, coef_8_all) %>%
+  ungroup()
+
+write.csv(corr_coef, "C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/corr_coef.csv")
 ```  
 
 

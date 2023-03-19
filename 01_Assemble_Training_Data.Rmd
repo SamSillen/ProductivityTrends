@@ -21,6 +21,7 @@ library(chron)
 library(reshape2)
 library(lubridate)
 library(zoo)
+library(USAboundaries)
 
 baseDir <- "C:/Users/samsi/Desktop/WesternMountainsChlPreds/"
 
@@ -55,10 +56,37 @@ aquasat_raw <- read.csv(paste0(baseDir, "/Data/sr_wq_rs_join.csv")) %>%
 
 aquasat_roi <- st_join(aquasat_raw, roi, left = FALSE) %>%
   select(-STATEFP, -STATENS, -AFFGEOID, -GEOID, -STUSPS, -LSAD, -ALAND, -AWATER) 
+aquasat_roi$SiteID
+
+data_map <- aquasat_roi %>% 
+  group_by(SiteID) %>%
+  summarise(Count = n()) %>%
+  st_transform(2163)
+
+usa <- us_states() %>%
+  st_transform(2163) %>%
+  filter(state_abbr %in% c("WY", "ID", "MT", "CO", "UT"))
+
+# plot matchup sites
+ggplot() +
+  geom_sf(data=usa, color="blue", fill="white") +
+  geom_sf(data=data_map, aes(color=Count), alpha=0.5, size=0.8) +
+  #geom_sf(data=huc2_basins, color="black", fill="NA", size=0.5)
+  theme(legend.position = c(0.98, 0.29),
+    line = element_blank(), 
+    rect = element_blank(), 
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    plot.background = element_blank(),
+    legend.text = element_text(size=9))
+
+#Note, 1389 observations in aquasat roi ; check if there are any duplicates here ? 
+
+aquasat_roi <- aquasat_roi %>% distinct(SiteID, blue, green, red, date, chl_a, .keep_all = TRUE)
 
 ```
 
-2) Pull NHD COMIDS from Intermountain West states, join to LAGOS lake charactersitc data via st_nearest_feature, join to the aquasat roi via nearest feature
+2) Pull NHD COMIDS from Intermountain West states, join to join to the aquasat roi via st_intersects
 ```{r}
 states <- c('Wyoming', 'Montana', 'Colorado', 'Idaho', 'Utah')
 
@@ -70,10 +98,11 @@ lakes <- sf::st_read(dsn="C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/n
   filter(FTYPE %in% c("LakePond", "Reservoir"))
 
 aquasat_roi <- st_join(aquasat_roi, lakes, join = st_intersects)
+```
 
 
 #Adding lagos data , I only need a few things here: lagoslakeID, nhdid, 
-
+```{r}
 lagos_roi <- read.csv(paste0(baseDir,"/Data/lake_information.csv")) %>%
   filter(lake_centroidstate == 'WY' | lake_centroidstate == 'CO' | lake_centroidstate == 'ID' | lake_centroidstate == 'MT' |  
          lake_centroidstate == 'UT') %>%
@@ -86,7 +115,6 @@ lagos_roi <- read.csv(paste0(baseDir,"/Data/lake_information.csv")) %>%
   distinct(COMID, .keep_all = TRUE)
 
 aquasat_roi <- left_join(aquasat_roi, lagos_roi, by = 'COMID')
-
 ```
 
 3) Add LakeCat data to aquasat roi for final df
@@ -225,9 +253,6 @@ df.surf_temp <- df.surf_temp %>%
 df.surf_temp <- df.surf_temp %>%
   mutate(temp_mean_14_day = rollmean(temp, k = 14, fill = NA, align = 'right'))
 
-#remove vars
-rm(days, nc_dat, nc_time, tdstr, tunits, tustr)
-
 #Creating date fields
 training$date <- as_date(training$date)
 
@@ -243,12 +268,15 @@ training <- training %>%
 #Join to training data
 training <- left_join(training, df.surf_temp, by = c('siteID', 'date'))
 
+#Clean up work env.
+
+#remove vars from work environment
+rm(df.surf_temp, lagos_roi, lakeCat, lakeCat.full, lakeCat.shrunk, lakes, lc, nhd_paths, roi, lc.files, tday, tdstr, tmonth, tunits, tustr, tyear, nc_dat, round.1, round1, states)
 ```
 
-#Do same process but for wind speed 
+# Do same process but for wind speed 
 ```{r}
-#remove vars from work environment
-rm(df.surf_temp, lagos_roi, lakeCat, lakeCat.full, lakeCat.shrunk, lakes, lc, nhd_paths, roi)
+
 
 nc_dat <- nc_open(paste0(baseDir, "/Data/01_weather_N24-53_W98-126.nc"))
 
@@ -276,9 +304,8 @@ wind_speed <- t(wind_speed) #transpose the matrix
 
 ```
 
-#Pull out nhdid's from training file that we'll use to filter matrix
+# Pull out nhdid's from training file that we'll use to filter matrix
 ```{r}
-
 #First pull out nhdids from surf_temp matrix
 
 site_ids <- as.data.frame(nc_siteid)
@@ -313,7 +340,7 @@ wind_speed <- as.data.frame(wind_speed)
 wind_speed <- tibble::rownames_to_column(wind_speed, "weatherID")
 ```
 
-#Convert time (days from origin) to meaningful date field
+# Convert time (days from origin) to meaningful date field
 ```{r}
 time <- ncvar_get(nc_dat,"time")
 
