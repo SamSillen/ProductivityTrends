@@ -236,7 +236,7 @@ coef_8_all <- sr_78_rank %>%
   mutate(sat = "8") %>%
   mutate(fit = "all_quant")
 
-coef_7 <- tibble(band = c("blue", "red", "green", "nir", "swir1", "swir2"), intercept = 0, coef1=1, coef2=0, sat= "LE07")
+coef_7 <- tibble(band = c("blue", "red", "green", "nir", "swir1", "swir2"), intercept = 0, coef1=1, coef2=0, sat= "7")
 
 #
 corr_coef <- bind_rows(coef_5, coef_7, coef_8, coef_5_all, coef_8_all) %>%
@@ -245,6 +245,33 @@ corr_coef <- bind_rows(coef_5, coef_7, coef_8, coef_5_all, coef_8_all) %>%
 write.csv(corr_coef, "C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/corr_coef.csv")
 ```  
 
+3) Add corrected band values to training set 
+```{r}
 
+correction_coef_99 <- corr_coef %>%
+  filter(fit %in% c(NA, "98_quant")) %>%
+  dplyr::select(-fit)
+
+training <- read_csv("data/training.csv")
+
+training <- training %>%
+  mutate(rn = row_number()) %>%
+  mutate(sat = as.character(sat)) %>%
+  gather(red ,green, blue, nir, swir1, swir2, key='band', value='value') %>%
+  group_by(band, sat) %>%
+  left_join(correction_coef_99, by=c("band", "sat")) %>%
+  mutate(value_cor=  coef2*value^ 2 + coef1*value + intercept) %>%
+  ungroup() %>%
+  mutate(value_cor = ifelse(value_cor <=0, value, value_cor)) %>%
+  dplyr::select(-intercept, -coef1, -coef2) %>%
+  pivot_wider(names_from = band,
+              values_from = c("value", "value_cor"))  %>%
+    rename_at(vars(starts_with("value_")),
+           function(x) stringr::str_replace_all(x, "value_", "")) %>%
+    rename_at(vars(red, green, blue, nir, swir1, swir2),function(x) paste0(x,"_raw")) %>%
+    rename_at(vars(starts_with("cor")),            funs(stringr::str_replace_all(., "cor_", ""))) 
+
+write.csv(training, "data/training.csv")
+```
 
 
