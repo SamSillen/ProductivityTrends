@@ -1,0 +1,374 @@
+---
+title: "Aquasat_LAGOS_NHD_LakeCat_Merge"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Required Packages
+```{r}
+library(tidyverse)
+library(sf)
+library(nngeo)
+library(nhdplusTools)
+library(tigris)
+library(ncdf4)
+library(chron)
+library(reshape2)
+library(lubridate)
+library(feather)
+library(leaflet)
+library(tigris)
+library(zoo)
+sf_use_s2(FALSE)
+
+```
+
+# Workflow
+```{r}
+
+#1) Read in nhd data for lakes within the roi of this study (WY, ID, UT, MT, CO)
+
+#2) Read in LAGOS LOCUS (lake location) data within the roi of this study, and join it to nhd lakes using st_intersects (NOTE: nhd has the polygons, whereas everything else hereafter containing spatial data will be points, therefore joining will have to require joining the point data to the lake polygon data do prevent misjoins)
+
+#3) Read in the LimnoSat lake metadata (basically, Hylak_ids) and join it to the comids_lagos_roi df using the same methodology as #2, then join to Limnosat via "Hylak_id'
+
+#4) Add lakeCat metrics using the common identifier 'COMID'
+
+#5) Add in climate data (lake temperature and wind speed)
+
+
+
+```
+
+#1) NHD Data
+```{r}
+
+states <- states(cb = TRUE)
+
+roi <- subset(states, states$NAME == 'Montana' | states$NAME == 'Idaho' | states$NAME == 'Wyoming' | states$NAME == 'Colorado' | states$NAME == 'Utah') %>% 
+st_transform(st_crs(4326))
+
+#this is the limnosat point data connected to hylak id
+
+limnosat_dp <- read_sf("C:/Users/samsi/OneDrive - University of Pittsburgh/LimnoSat/HydroLakes_DP.shp") %>% 
+filter(type == 'dp')
+
+limnosat_roi <- st_join(limnosat_dp, roi, left = FALSE) %>%
+  select(-STATEFP, -STATENS, -AFFGEOID, -GEOID, -STUSPS, -LSAD, -ALAND, -AWATER) 
+```
+
+2) Pull NHD COMIDS from Intermountain West states, join to join to the limnosat roi via st_intersects
+```{r}
+nhdplusTools::nhdplus_path("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/nhd/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb")
+
+nhd_paths <- nhdplusTools::stage_national_data(output_path = 'C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/nhd/NHDPlusNationalData')
+
+lakes <- sf::st_read(dsn="C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/nhd/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb", layer = "NHDWaterbody") %>%
+  filter(FTYPE == 'LakePond' | FTYPE == 'Reservoir') %>%
+  st_transform(st_crs(limnosat_roi))
+
+limnosat_roi <- st_join(limnosat_roi, lakes, join = st_intersects)
+
+limnosat_roi <- limnosat_roi %>% filter(!is.na(COMID)) # ~500 observations are not within nhd polygons 
+```
+
+#Adding lagos data , I only need a few things here: lagoslakeID, nhdid, 
+```{r}
+lagos_roi <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/lake_information.csv") %>%
+  filter(lake_centroidstate == 'WY' | lake_centroidstate == 'CO' | lake_centroidstate == 'ID' | lake_centroidstate == 'MT' |  
+         lake_centroidstate == 'UT') %>%
+  st_as_sf(coords=c("lake_lon_decdeg","lake_lat_decdeg"), crs=4326, remove=FALSE)  %>%
+  select(lagoslakeid, lake_nhdid, lake_elevation_m, lake_lon_decdeg, lake_lat_decdeg) %>%
+  st_transform(st_crs(aquasat_roi)) %>%
+  st_join(lakes) %>%
+  select(lagoslakeid, COMID, lake_nhdid, lake_elevation_m) %>%
+  as_tibble() %>% 
+  distinct(COMID, .keep_all = TRUE)
+
+limnosat_roi <- left_join(limnosat_roi, lagos_roi, by = 'COMID')
+```
+
+
+#4) Limnosat-US data
+```{r}
+ls <- read_feather('C:/Users/samsi/OneDrive - University of Pittsburgh/LimnoSat/LimnoSat_20200628.feather')
+
+limnosat_sr <- left_join(limnosat_roi, ls, by = 'Hylak_id')
+```
+
+
+
+#4) LakeCat
+```{r}
+lakeCat <- tibble(COMID = unique(limnosat_sr$COMID))  
+
+lc.files <- list.files('C:/Users/samsi/OneDrive - University of Pittsburgh/lakeCat', full.names = TRUE)
+
+for(i in lc.files){
+  if(i == first(lc.files)){
+    lc <- read.csv(i)
+    lakeCat.full <- lakeCat %>%
+      left_join(lc, by ='COMID')}
+  else{
+    lc <- read.csv(i) %>%
+      select(-c(CatAreaSqKm, WsAreaSqKm, CatPctFull,WsPctFull,inStreamCat))
+    lakeCat.full <- lakeCat.full %>%
+      left_join(lc, by = 'COMID')
+  }
+}
+
+round1 <- names(lakeCat.full %>% select(c(CatAreaSqKm:CatPctFull,PctImp2006Cat, PctCarbResidCat:WetIndexCat)))
+
+round.1 <- names(lakeCat.full %>% select(c(AgKffactCat, KffactCat, MineDensCat)))
+
+lakeCat.full <- lakeCat.full %>%
+  mutate_at(round1, round, digits = 0) %>%
+  mutate_at(round.1, round, digits = 1)
+
+lakeCat.shrunk <- lakeCat.full %>%
+  select("COMID", "Tmean8110Cat", "ClayCat", "OmCat", "PermCat", "RckdepCat", "BFICat", "CatAreaSqKm", "PctAg2006Slp10Cat", "NPDESDensCat", "HydrlCondCat", "PctImp2006Cat", "PctUrbLo2006Cat", "PctUrbMd2006Cat", "PctUrbHi2006Cat", "PctDecid2006Cat", "PctConif2006Cat", "PctMxFst2006Cat", "PctCrop2006Cat", "PctWdWet2006Cat", "PctHbWet2006Cat", "KffactCat", "NO3_2008Cat", "RunoffCat", "WtDepCat", "WetIndexCat")
+
+limnosat_sr <- left_join(limnosat_sr, lakeCat.shrunk, by = 'COMID')
+
+#write a file here in case something goes wrong when adding climate data and I have to re-do
+limnosat_sr <- limnosat_sr %>% select(-geometry.x, -geometry.y)
+write_feather(limnosat_sr,'C:/Users/samsi/Desktop/limnosat_with_lakecat.feather')
+
+```
+
+4) Add in lake temperature variables -- this chunk works with very large dfs and can be a pain (most notably transposing the surface temp matrix which takes ages)
+```{r}
+#limnosat_sr <- read_feather('C:/Users/samsi/Desktop/limnosat_with_lakecat.feather')
+
+lake_ids <- limnosat_sr %>%
+  select(lake_nhdid) %>%
+  distinct(lake_nhdid)
+
+nc_dat <- nc_open("C:/Users/samsi/Desktop/thesis/01_predicted_temp_N24-53_W98-126.nc")
+
+#retrieve a matrix of the surf temp data 
+
+surf_temp <- ncvar_get(nc_dat, attributes(nc_dat$var)$names[4])
+
+attributes(nc_dat$dim)
+
+nc_siteid <- ncvar_get( nc_dat, attributes(nc_dat$dim)$names[1])
+
+nc_time <- ncvar_get( nc_dat, attributes(nc_dat$dim)$names[3])
+
+print(paste(dim(nc_time), "times and", dim(nc_siteid), "site_ids"))
+
+dimnames(surf_temp) <- list(time = nc_time, siteid = nc_siteid)
+
+surf_temp <- t(surf_temp) #transpose the matrix
+
+#pull out nhdids from surf_temp matrix
+
+site_ids <- as.data.frame(nc_siteid)
+
+#These ids have a prefix of "nhdhr_" that we will have to remove for the timebeing 
+site_ids <- site_ids %>%
+  transform(nc_siteid = str_replace(nc_siteid, "nhdhr_", ""))
+
+# Now dig up nhdids from limnosat file
+site_ids <- site_ids %>%
+  filter(nc_siteid %in% lake_ids$lake_nhdid)
+
+#re_apply the nhdhr prefix
+site_ids$nc_siteid = paste0('nhdhr_', site_ids$nc_siteid)
+
+#Have to create a character string of site_ids included in site_ids (this might be weird and convoluted but it worked for me...)
+site_ids <- site_ids %>%
+  mutate(blank = 0 )
+
+site_ids <- pivot_wider(site_ids, names_from = nc_siteid, values_from = blank)
+
+site_ids <- as.character(colnames(site_ids))
+
+#subset surf_temp dataset to include the lakes that are included in the training/aquasat file
+
+surf_temp <- surf_temp[site_ids , ]
+
+df.surf_temp <- as.data.frame(surf_temp)
+
+df.surf_temp <- tibble::rownames_to_column(df.surf_temp, "siteID")
+
+#Convert time (days from x) to meaningful date field
+time <- ncvar_get(nc_dat,"time")
+
+tunits <- ncatt_get(nc_dat,"time","units")
+
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+
+nc_time <- as.data.frame(nc_time)
+
+days <- as_data_frame(chron(time,origin=c(tmonth, tday, tyear))) %>%
+  mutate(number = nc_time$nc_time)
+
+days$number <- as.factor(days$number)
+
+df.surf_temp <- melt(df.surf_temp, id.vars = 1)
+
+df.surf_temp <- df.surf_temp %>%
+  rename(number = "variable", 
+         temp = "value")
+
+df.surf_temp <- left_join(df.surf_temp, days, by = "number") %>%
+  rename(date = 'value')
+
+nc_close(nc_dat)
+
+df.surf_temp$date <- as_date(df.surf_temp$date)
+
+df.surf_temp$date <- ymd(df.surf_temp$date)
+
+df.surf_temp <- df.surf_temp %>%
+  select(-number)
+
+#Add 14 day rolling mean for surface temperature
+df.surf_temp <- df.surf_temp %>%
+  mutate(temp_mean_14_day = rollmean(temp, k = 14, fill = NA, align = 'right'))
+
+#Creating date fields
+limnosat_sr$date <- as_date(limnosat_sr$date)
+
+limnosat_sr$lake_nhdid = paste0('nhdhr_', limnosat_sr$lake_nhdid)
+
+limnosat_sr <- limnosat_sr %>%
+  rename(siteID = 'lake_nhdid')
+
+#Join to training data
+limnosat_sr <- left_join(limnosat_sr, df.surf_temp, by = c('siteID', 'date')) 
+
+```
+
+
+# Do same process but for wind speed 
+```{r}
+nc_dat <- nc_open( "C:/Users/samsi/Desktop/thesis/01_weather_N24-53_W98-126.nc")
+
+print(paste("The file has",nc_dat$nvars,"variables,",nc_dat$ndims,"dimensions and",nc_dat$natts,"NetCDF attributes"))
+
+#weather id attaches weather vars (wind speed) to lakes 
+
+#retrieve a matrix of the wind data (7 = 10-m above ground meridional wind speed (m/s) ; 6 = 10-m above ground zonal wind speed (m/s))
+
+wind_speed <- ncvar_get(nc_dat, attributes(nc_dat$var)$names[7])
+
+#attributes are weather_id, time, weather_id_char; I'm going to want the weather id and time to add to the surf_temp matrix
+
+nc_siteid <- ncvar_get( nc_dat, attributes(nc_dat$dim)$names[1])
+
+nc_time <- ncvar_get( nc_dat, attributes(nc_dat$dim)$names[2])
+
+print(paste(dim(nc_time), "times and", dim(nc_siteid), "site_ids"))
+
+#dimensions for surf_temp and nc_time and nc_siteid match
+
+dimnames(wind_speed) <- list(time = nc_time, siteid = nc_siteid)
+
+wind_speed <- t(wind_speed) #transpose the matrix
+
+```
+
+# Pull out nhdid's from training file that we'll use to filter matrix
+```{r}
+#First pull out nhdids from surf_temp matrix
+
+site_ids <- as.data.frame(nc_siteid)
+
+#Add in lake metadata that links lake ids to weather ids 
+
+metadata <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/lake_metadata.csv")
+
+lagos_ids <- limnosat_sr %>% 
+  select(siteID) %>% 
+  distinct(siteID)
+
+site_ids <- metadata %>%
+  select(site_id, weather_id) %>%
+  filter(site_id %in% lagos_ids$siteID)
+
+site_ids <- site_ids %>%
+  select(weather_id)
+
+site_ids <- site_ids %>%
+  mutate(blank = 0 )
+
+site_ids <- pivot_wider(site_ids, names_from = weather_id, values_from = blank)
+
+site_ids <- as.character(colnames(site_ids))
+
+#subset surf_temp dataset to include the lakes that are included in the training/aquasat file
+
+wind_speed <- wind_speed[site_ids , ]
+
+wind_speed <- as.data.frame(wind_speed)
+
+wind_speed <- tibble::rownames_to_column(wind_speed, "weatherID")
+```
+
+# Convert time (days from origin) to meaningful date field
+```{r}
+time <- ncvar_get(nc_dat,"time")
+
+tunits <- ncatt_get(nc_dat,"time","units")
+
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+
+nc_time <- as.data.frame(nc_time)
+
+days <- as_data_frame(chron(time,origin=c(tmonth, tday, tyear))) %>%
+  mutate(number = nc_time$nc_time)
+
+days$number <- as.factor(days$number)
+
+wind_speed <- melt(wind_speed, id.vars = 1)
+
+wind_speed <- wind_speed %>%
+  rename(number = "variable", 
+         wind = "value")
+
+wind_speed <- left_join(wind_speed, days, by = "number")
+
+nc_close(nc_dat)
+
+id <- metadata %>%
+  select(weather_id, site_id) %>%
+  rename(siteID = "site_id") %>% 
+  filter(siteID %in% lagos_ids$siteID)
+
+id <- left_join(id, lagos_ids, by = 'siteID')
+
+id <- id %>%
+  rename(weatherID = 'weather_id')
+
+wind_speed <- left_join(wind_speed, id , by = 'weatherID')
+
+wind_speed <- wind_speed %>%
+  rename(date = 'value')
+
+wind_speed$date <- as_date(wind_speed$date)
+
+wind_speed <- wind_speed %>% select(siteID, date, wind) %>%
+  distinct(siteID, date, .keep_all = TRUE)
+
+limnosat_final <- left_join(limnosat_sr, wind_speed, by = c('siteID', 'date'))
+
+write_feather(limnosat_final, "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/limnosat_final.csv")
+
+```
+
