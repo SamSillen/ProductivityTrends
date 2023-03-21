@@ -5,22 +5,23 @@ date: '2023-02-17'
 output: html_document
 ---
 
-1) Required packages
+# Required packages
 ```{r}
 library(tidyverse)
 library(lubridate)
 library(colorscience)
 library(broom)
-source("C:/Users/samsi/Desktop/WesternMountainsChlPreds-main/ML_utils.R")
+library(feather)
 ```
 
 
-2) Get correction coefficients 
+# 1) Get correction coefficients 
 ```{r}
 
-data <- read.csv("C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/sr_wq_rs_join.csv") %>% 
+data <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/LimnoSat/LimnoSat_20200628.feather") %>% 
+  filter(across(c(Blue, Green, Red, Nir, Swir1, Swir2), ~ .x > 0 & .x < 10000)) %>% 
   mutate(year = year(date)) %>% 
-  group_by(SiteID) %>%
+  group_by(Hylak_id) %>%
   mutate(count =n(),
                   max_year=max(year, na.rm=T),
                   min_year = min(year, na.rm=T),
@@ -31,17 +32,24 @@ data$sat <- as.character(data$sat)
 
 # bands are quite different but dw is not 
 sr_57 <- data %>%
-  filter(sat %in% c("7", "5")) %>%
-  filter(date > "1999-01-01" & date < "2012-05-01") %>%
+  filter(sat %in% c("l7", "l5")) %>%
+  filter(date > "1999-01-01" & date < "2012-05-01" ) %>%
   # filter to site with enough data
   filter(n_years > 10) %>%
-  select(SiteID, date, sat, count, n_years, blue, red, green, nir, swir1, swir2) %>%
-  gather(blue:swir2, green, key='band', value='value') 
+  select(Hylak_id, date, sat, count, n_years, Blue, Red, Green, Nir, Swir1, Swir2) %>%
+  gather(Blue, Red, Green, Nir, Swir1, Swir2, key='band', value='value') 
+
+# plot distribution compare means
+# ggplot(data=sr_57, aes(x=value, color=sat)) +
+#   geom_density() +
+#   facet_wrap(~band, scales="free")
+
+
 
 # do ranking plotting percentiles, joining, and correcting
 sr_57_rank  <- sr_57 %>%
   droplevels() %>%
-  filter(sat =="5") %>%
+  filter(sat =="l5") %>%
   group_by(band) %>%
   nest() %>%
   mutate( ret = purrr::map(data, ~quantile(.$value, probs = seq(0,1,0.01))),
@@ -55,7 +63,7 @@ sr_57_rank  <- sr_57 %>%
   rename(value_5 = value) %>%
   inner_join(sr_57 %>%
                droplevels() %>%
-               filter(sat =="7") %>%
+               filter(sat =="l7") %>%
                group_by(band) %>%
                nest() %>%
                mutate( ret = purrr::map(data, ~quantile(.$value, probs = seq(0,1,0.01))),
@@ -130,15 +138,16 @@ coef_5_all <- sr_57_rank %>%
   mutate(sat = "5") %>%
   mutate(fit = "all_quant")
 
+
 ########################
 
 sr_78 <- data %>%
-  filter(sat %in% c("7", "8")) %>%
+  filter(sat %in% c("l7", "l8")) %>%
   filter(date > "2013-04-11" ) %>%
   # filter to site with enough data
   filter(n_years > 10) %>%
-  select(SiteID, date, sat, count, n_years, blue, red, green, nir, swir1, swir2) %>%
-  gather(blue:swir2, key='band', value='value') 
+  select(Hylak_id, date, sat, count, n_years, Blue, Red, Green, Nir, Swir1, Swir2) %>%
+  gather(Blue, Red, Green, Nir, Swir1, Swir2, key='band', value='value') 
 
 # plot distribution compare means
 # ggplot(data=sr_78, aes(x=value, color=sat)) +
@@ -148,7 +157,7 @@ sr_78 <- data %>%
 # do ranking plotting percentiles, joining, and correcting
 sr_78_rank  <- sr_78 %>%
   droplevels() %>%
-  filter(sat =="8") %>%
+  filter(sat =="l8") %>%
   group_by(band) %>%
   nest() %>%
   mutate( ret = purrr::map(data, ~quantile(.$value, probs = seq(0,1,0.01))),
@@ -162,7 +171,7 @@ sr_78_rank  <- sr_78 %>%
   rename(value_8 = value) %>%
   inner_join(sr_78 %>%
                droplevels() %>%
-               filter(sat =="7") %>%
+               filter(sat =="l7") %>%
                group_by(band) %>%
                nest() %>%
                mutate( ret = purrr::map(data, ~quantile(.$value, probs = seq(0,1,0.01))),
@@ -176,7 +185,6 @@ sr_78_rank  <- sr_78 %>%
                rename(value_7 = value) %>%
                dplyr::select(-name),
              by=c("band", "quant"))  
-
 
 poly_8_trunc <- function(df){
   lm(value_7 ~ poly(value_8, 2), data = df %>%
@@ -204,7 +212,6 @@ ggplot(poly_78) +
   geom_abline(aes(slope=1, intercept=0)) +
   facet_wrap(~band, scales="free") +
   theme_bw()
-dev.off()
 
 coef_8 <- sr_78_rank %>%
   ungroup() %>%
@@ -236,23 +243,24 @@ coef_8_all <- sr_78_rank %>%
   mutate(sat = "8") %>%
   mutate(fit = "all_quant")
 
-coef_7 <- tibble(band = c("blue", "red", "green", "nir", "swir1", "swir2"), intercept = 0, coef1=1, coef2=0, sat= "7")
+#
+coef_7 <- tibble(band = c("Blue", "Red", "Green", "Nir", "Swir1", "Swir2"), intercept = 0, coef1=1, coef2=0, sat= "7")
 
 #
 corr_coef <- bind_rows(coef_5, coef_7, coef_8, coef_5_all, coef_8_all) %>%
   ungroup()
 
-write.csv(corr_coef, "C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/corr_coef.csv")
+write.csv(corr_coef, "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/corr_coef_aquasat_filtered.csv", row.names = FALSE)
 ```  
 
-3) Add corrected band values to training set 
+# 2) Add corrected band values to training set 
 ```{r}
+training <- read_csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/data/training_raw.csv") 
 
 correction_coef_99 <- corr_coef %>%
   filter(fit %in% c(NA, "98_quant")) %>%
-  dplyr::select(-fit)
-
-training <- read_csv("data/training.csv")
+  dplyr::select(-fit) %>%
+  mutate(band = tolower(band))
 
 training <- training %>%
   mutate(rn = row_number()) %>%
@@ -271,7 +279,7 @@ training <- training %>%
     rename_at(vars(red, green, blue, nir, swir1, swir2),function(x) paste0(x,"_raw")) %>%
     rename_at(vars(starts_with("cor")),            funs(stringr::str_replace_all(., "cor_", ""))) 
 
-write.csv(training, "data/training.csv")
+write.csv(training, "data/training_Standardized.csv", row.names = FALSE)
 ```
 
 
