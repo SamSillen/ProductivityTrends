@@ -168,7 +168,7 @@ best_params <- list(booster = "gbtree", objective = 'multi:softmax',
 final_model <- xgb.train(params = best_params, data = dtrain, nrounds = 2000, 
                          print_every_n = 20, num_class = 3)
 
-saveRDS("C:/Users/samsi/Desktop/final_model.rds")
+saveRDS(final_model, "C:/Users/samsi/OneDrive - University of Pittsburgh/final_model.rds")
 
 test <- test %>%
   mutate(trophic_predicted = predict(final_model, dtest),
@@ -229,3 +229,64 @@ theme(axis.text.x=element_text(size=15, colour = 'black'),panel.grid.minor = ele
 
 ```
 
+# 6) Predict model 
+```{r}
+
+sr_final <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/limnosat_final.csv")
+
+baseDir <- "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/"
+
+source(paste0(baseDir,'ML_utils.R'))
+
+
+corr_coef <- read_csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/corr_coef_limnosat_filtered.csv")
+
+correction_coef_99 <- corr_coef %>%
+  filter(fit %in% c(NA, "98_quant")) %>%
+  dplyr::select(-fit) %>%
+  mutate(band = tolower(band))
+
+#add features for model training 
+preds <- sr_final %>%
+  rename_at(vars(Blue, Green, Red, Nir, Swir1, Swir2), tolower) %>%
+  filter(pCount_dswe1 > 9,
+         across(c(blue, green, red, nir, swir1, swir2), ~ .x > 0 & .x < 2000)) %>% # taken from Simon Code (reasonable reflectance values)
+  mutate(rn = row_number()) %>%
+  mutate(sat = as.character(sat)) %>%
+  gather(red ,green, blue, nir, swir1, swir2, key='band', value='value') %>%
+  group_by(band, sat) %>%
+  left_join(correction_coef_99, by=c("band", "sat")) %>%
+  mutate(value_cor=  coef2*value^ 2 + coef1*value + intercept) %>%
+  ungroup() %>%
+  mutate(value_cor = ifelse(value_cor <=0, value, value_cor)) %>%
+  dplyr::select(-intercept, -coef1, -coef2) %>%
+  pivot_wider(names_from = band,
+              values_from = c("value", "value_cor"))  %>%
+  rename_at(vars(starts_with("value_")),
+            function(x) stringr::str_replace_all(x, "value_", "")) %>%
+  rename_at(vars(red, green, blue, nir, swir1, swir2),function(x) paste0(x,"_raw")) %>%
+  rename_at(vars(starts_with("cor")),            funs(stringr::str_replace_all(., "cor_", "")))  %>%
+   mutate(dWL = fui.hue(red, green, blue),
+         red_to_blue = red/blue,
+         red_to_nir = red/nir,
+         nir_to_red = nir/red,
+         blue_to_green = blue/green,
+         green_to_blue = green/blue,
+         blue_min_red_ovr_green = (blue-red)/(green),
+         nir_sac = nir-swir1,
+         nir_sac2 = nir-1.03*swir1,
+         nir_min_red = nir-red,
+         red_min_green = red - green, 
+         EVI = 2.5*((nir-red)/(nir+((6*red)-(7.5*blue))+1)), 
+         GCI =  nir/(green-1))
+
+feats <- c("blue", "dWL", "nir", "swir2", "red_to_blue", "red_to_nir", "nir_to_red", "green_to_blue", "nir_sac", "nir_min_red", "temp_mean_14_day", "wind", "red_min_green", "EVI", "GCI")
+
+preds <- preds %>% 
+  filter_all(all_vars(!is.infinite(.))) %>%
+  filter_all(all_vars(!is.nan(.))) %>% 
+  drop_na(temp) %>%
+  mutate(pred = predict(final_model, as.matrix(preds[,feats])))
+
+write_feather(preds, "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/preds.feather")
+```
