@@ -1,0 +1,235 @@
+---
+title: "Trend_analysis"
+author: "S. Sillen"
+date: '2022-06-09'
+output: html_document
+---
+
+Required Packages
+```{r}
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(ggpubr)
+library(xgboost)
+library(feather)
+```
+
+
+# Workflow
+```{r}
+
+# 1) Read in sf file ; filter to summer obs > 2 per year ; determine percetage of trophic state observation per year per lake
+
+# 2) Summarise classes across 2 time frames (1984-2005) (2005-2020)
+
+# 3) Identify no change lakes, lakes trending eutrophic, and lakes trending oligotrophic
+
+# 4) Create plot that shows an example of how lakes fit into each of these categories
+```
+
+
+# 1) Read in preds file ; filter to summer obs > 2 per year ; determine percetage of trophic state observation per year per lake
+```{r}
+preds <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/preds.feather")
+
+preds <- preds %>%
+  mutate(pred = case_when(pred==0~'oligotrophic',
+                                pred==1~'mesotrophic',
+                                pred==2~'eutrophic')) %>%
+  mutate(month = month(date, label = TRUE)) %>%
+  mutate(year = as.integer(year)) %>%
+  filter(year != 2020) %>% #Limnosat ends in June 2020 so there are very few (4) sites that have enough 2020 to be included here
+  filter(type == 'dp',
+         month %in% c('Jun', 'Jul', 'Aug', 'Sep')) %>%
+  mutate(year = year(date)) %>%
+  group_by(Hylak_id, year) %>%
+  filter(n() >= 2) %>%
+  ungroup()
+
+# Filter for 35 years of data (1984-2019)
+df <- preds %>%
+group_by(Hylak_id) %>%
+mutate(unique_years = length(unique(year))) %>% 
+filter(unique_years >= 35) %>% ungroup() 
+
+preds <- preds %>%
+  filter(Hylak_id %in% df$Hylak_id)
+
+# get total number of observations at each site for each year so we can calculate percentages later 
+yearly_observations <- preds %>%
+  group_by(Hylak_id, year) %>%
+  summarise(total_obs = n()) %>%
+  ungroup()
+
+# prepare for loop
+trophic_states <- c('oligotrophic', 'mesotrophic', 'eutrophic')
+
+# for each trophic state, get the number of observations within each year at each site
+for (i in trophic_states) {
+    state <- preds %>%
+      filter(pred == i) %>%
+      group_by(year,Hylak_id) %>%
+      summarise(count = n())
+    yearly_observations <- left_join(yearly_observations, state, by = c('year', 'Hylak_id'))
+}
+
+# calculate percentages based on total number of obs in a year and the number of obs in a year for each trophic state 
+yearly_observations <- yearly_observations %>%
+  mutate_all(funs(replace_na(.,0))) %>%
+  rename(count_oligotrophic = 'count.x',
+         count_mesotrophic = 'count.y',
+         count_eutrophic = 'count') %>%
+  mutate(pct_oligotrophic = (count_oligotrophic / total_obs)*100,
+         pct_mesotrophic = (count_mesotrophic / total_obs)*100,
+         pct_eutrophic = (count_eutrophic / total_obs)*100) 
+
+```
+
+# 2) Summarise (average) classes across 2 time frames (1984-2005 == 'early') (2005-2020 == 'late')
+```{r}
+early <- yearly_observations %>%
+  filter(year < 2005) %>%
+  group_by(Hylak_id) %>%
+  summarise(early_mean_oligotrophic = mean(pct_oligotrophic), early_mean_mesotrophic = mean(pct_mesotrophic), early_mean_eutrophic = mean(pct_eutrophic))
+
+late <- yearly_observations %>%
+  filter(year >= 2005) %>%
+  group_by(Hylak_id) %>%
+  summarise(late_mean_oligotrophic = mean(pct_oligotrophic), late_mean_mesotrophic = mean(pct_mesotrophic), late_mean_eutrophic = mean(pct_eutrophic))
+
+trends_all <- left_join(early, late, by = 'Hylak_id') %>%
+    mutate(oligotrophic_delta = (late_mean_oligotrophic - early_mean_oligotrophic),
+          mesotrophic_delta = (late_mean_mesotrophic - early_mean_mesotrophic),
+          eutrophic_delta = (late_mean_eutrophic - early_mean_eutrophic))
+```
+
+# 3) Identify no change lakes, lakes trending eutrophic, and lakes trending oligotrophic
+```{r}
+no_trend <- trends_all %>%
+  filter(oligotrophic_delta < 10 & oligotrophic_delta >-10, 
+         mesotrophic_delta < 10 & mesotrophic_delta > -10, 
+         eutrophic_delta < 10 & eutrophic_delta > -10) %>%
+  mutate(trend = 'no trend')
+
+trending_eutrophic <- trends_all %>%
+  filter(eutrophic_delta > 10, oligotrophic_delta < -10) %>%
+  mutate(trend = 'trending eutrophic')
+
+trending_oligotrophic <- trends_all %>%
+  filter(oligotrophic_delta > 10 , eutrophic_delta < -10) %>%
+  mutate(trend = 'trending oligotrophic')
+
+#bind them up
+trends <- rbind(no_trend, trending_eutrophic, trending_oligotrophic)
+
+#Percent of no change lakes
+nrow(no_trend) / nrow(trends_all) * 100
+
+#Percent of trending oligotrophic lakes
+nrow(trending_oligotrophic) / nrow(trends_all) * 100
+
+#Percent of trending eutrophic lakes 
+nrow(trending_eutrophic) / nrow(trends_all) * 100
+
+write.csv(trends, "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/data/trends.csv", row.names = FALSE)
+```
+
+# 4 Explore the general trophic state of the lakes in no trend lakes (i.e. are no chagne lakes mostly oligotrophic or eutrophic)
+```{r}
+no_trend_all <- yearly_observations %>% filter(Hylak_id %in% no_trend$Hylak_id) %>% 
+group_by(Hylak_id) %>% 
+summarise(mean_oligo = mean(pct_oligotrophic), mean_eutro = mean(pct_eutrophic))
+
+#Percentage of No trend lakes that are mostly oligotrophic
+nrow(no_trend_all %>% filter(mean_oligo > 50)) / nrow(no_trend) * 100 
+
+#Percentage of No trend lakes that are mostly eutrophic
+nrow(no_trend_all %>% filter(mean_eutro > 50)) / nrow(no_trend) * 100 
+
+```
+# 4) The following code creates Figure 2: Examples of possible trend categories based on the trends in % occurrence of trophic states.  
+```{r}
+# no trend  
+
+no_trend_example <- no_trend %>%
+fiilter(Hylak_id == 1032829) #Johnson Lake Montana
+
+no_trend_example <- yearly_observations %>%
+  filter(Hylak_id %in% no_trend_example$Hylak_id) %>%
+  rename(Oligotrophic = "pct_oligotrophic", 
+         Mesotrophic = "pct_mesotrophic",
+          Eutrophic = "pct_eutrophic") %>%
+  pivot_longer(cols = c("Oligotrophic", "Mesotrophic", "Eutrophic"), names_to = "Trophic_State")
+
+no_trend_example$Trophic_State <- factor(no_trend_example$Trophic_State, levels = c('Eutrophic', "Mesotrophic", "Oligotrophic"))
+
+no_trend_example_plot <- ggplot(no_trend_example, aes(x = year, y = value, fill = Trophic_State)) +
+  geom_bar(stat = "identity", show.legend = FALSE, color = 'black', width = 1) +
+  scale_fill_manual(values = c( '#7dae38',  '#698c86', '#2158bc')) +
+  labs(title = "A) No trend (Johnson Lake, MT)") +
+  xlab("Year") +
+  ylab("% Occurence") +
+  theme_bw() +
+  theme(legend.title = element_blank(), axis.title = element_text(size = 30), axis.text = element_text(size = 24, color = 'black'), legend.text = element_text(size = 30), title = element_text(size = 30, face = 'bold'))
+
+no_trend_example_plot
+
+## increasing in % oligotrophic
+
+trending_oligotrophic_example <- trending_oligotrophic %>%
+  filter(Hylak_id == 112052) #Tinmath Reservoir in CO
+
+trending_oligotrophic_example <- yearly_observations %>%
+  filter(Hylak_id %in% trending_oligotrophic_example$Hylak_id) %>%
+  rename(Oligotrophic = "pct_oligotrophic", 
+         Mesotrophic = "pct_mesotrophic",
+          Eutrophic = "pct_eutrophic") %>%
+  pivot_longer(cols = c("Oligotrophic", "Mesotrophic", "Eutrophic"), names_to = "Trophic_State")
+
+trending_oligotrophic_example$Trophic_State <- factor(trending_oligotrophic_example$Trophic_State, levels = c('Eutrophic', "Mesotrophic", "Oligotrophic"))
+
+
+trending_oligotrophic_example_plot <- ggplot(trending_oligotrophic_example, aes(x = year, y = value, fill = Trophic_State)) +
+  geom_bar(stat = "identity", show.legend = FALSE, color = 'black', width = 1) +
+  scale_fill_manual(values = c( '#7dae38',  '#698c86', '#2158bc')) +
+  labs(title = "B) Increasing in % Oligotrophic (Tinmath Reservoir, CO)") +
+  xlab("Year") +
+  ylab("% Occurence") +
+  theme_bw() +
+  theme(legend.title = element_blank(), axis.title = element_text(size = 30), axis.text = element_text(size = 24, color = 'black'), legend.text = element_text(size = 30), title = element_text(size = 30, face = 'bold'))
+
+trending_oligotrophic_example_plot
+
+## increasing eutrophic
+
+trending_eutrophic_example <- trending_eutrophic %>%
+filter(Hylak_id == 1054694) # Myeres Reservoir Wyoming
+1041710
+trending_eutrophic_example <- yearly_observations %>%
+  filter(Hylak_id %in% trending_eutrophic_example$Hylak_id) %>%
+  rename(Oligotrophic = "pct_oligotrophic", 
+         Mesotrophic = "pct_mesotrophic",
+          Eutrophic = "pct_eutrophic") %>%
+  pivot_longer(cols = c("Oligotrophic", "Mesotrophic", "Eutrophic"), names_to = "Trophic_State")
+
+trending_eutrophic_example$Trophic_State <- factor(trending_eutrophic_example$Trophic_State, levels = c('Eutrophic', "Mesotrophic", "Oligotrophic"))
+
+
+trending_eutrophic_example_plot <- ggplot(trending_eutrophic_example, aes(x = year, y = value, fill = Trophic_State)) +
+  geom_bar(stat = "identity", color = 'black', width = 1) +
+  scale_fill_manual(values = c( '#7dae38',  '#698c86', '#2158bc')) +
+  labs(title = "C) Increasing in % Eutrophic (Myers Reservoir, WY)") +
+  xlab("Year") +
+  ylab("% Occurence") +
+  theme_bw() +
+  theme(legend.title = element_blank(), axis.title = element_text(size = 30), axis.text = element_text(size = 24, color = 'black'), legend.text = element_text(size = 30), title = element_text(size = 30, face = 'bold'), legend.position = "bottom")
+
+trending_eutrophic_example_plot
+
+example_trends_plot <- ggarrange(no_trend_example_plot, trending_oligotrophic_example_plot, trending_eutrophic_example_plot, nrow = 3, ncol = 1)
+
+example_trends_plot
+
+```
+
