@@ -1,0 +1,380 @@
+---
+title: "06_Driver_analysis"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Required packages 
+```{r}
+library(USAboundaries)
+library(tidyverse)
+library(ggpubr)
+library(sf)
+library(grid)
+library(feather)
+library(corrplot)
+library(Hmisc)
+```
+
+# Make trend map (Figure 4)
+```{r}
+states <- us_states()
+
+roi <- states %>% filter(state_abbr %in% c('CA','NE','KS','ID', 'MT', 'UT', 'CO', 'WY', 'SD', 'ND', 'NV', 'WA', 'OR', 'AZ'))
+
+grob1 <- grobTree(textGrob("WYOMING", x=0.67,  y=0.54, hjust=0,
+                          gp=gpar(col="#8a8a8a", fontsize=13)))
+grob2 <- grobTree(textGrob("MONTANA", x=0.57,  y=0.73, hjust=0,
+                           gp=gpar(col="#8a8a8a", fontsize=13)))
+grob3 <- grobTree(textGrob("IDAHO", x=0.21,  y=0.52, hjust=0,
+                           gp=gpar(col="#8a8a8a", fontsize=13)))
+grob4 <- grobTree(textGrob("UTAH", x=0.42,  y=0.16, hjust=0,
+                           gp=gpar(col="#8a8a8a", fontsize=13)))
+grob5 <- grobTree(textGrob("COLORADO", x=0.82,  y=0.2, hjust=0,
+                           gp=gpar(col="#8a8a8a", fontsize=13)))
+
+# get location data 
+lakes <- read_sf("C:/Users/samsi/OneDrive - University of Pittsburgh/LimnoSat/HydroLakes_DP.shp") %>%
+filter(type == 'dp') 
+
+# load in trend data , join to location data
+trends <- read_csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/data/trends.csv")%>% 
+left_join(lakes) %>% 
+st_as_sf()
+library(leafgl)
+
+pal <- colorFactor(c( '#2158bc',  '#698c86', '#7dae38'), domain = c("improving", "no change", "worsening" ))
+
+trends$trend <- factor(trends$trend, levels = c('no trend', 'trending oligotrophic', 'trending eutrophic'))
+
+
+ggplot()+
+  geom_sf(data = roi, fill = "#292b30") +
+  geom_sf(data = trends, size = 2.5, alpha = 0.9,aes(fill = trend), pch = 21, colour = 'black')+
+  scale_fill_manual(values=c( '#698c86', '#2158bc', '#7dae38')) +
+  coord_sf(
+    ylim = c(36.99, 49.8),
+    xlim = c(-117.5,-101),
+    clip = "on",
+    expand = F
+  ) +
+  guides(fill = guide_legend(override.aes = list(size=5)))+
+  labs(x = "Longitude", y = "Latitude") +
+  theme_bw() +
+  theme(legend.title = element_blank(), legend.position = "bottom", axis.title = element_text(size = 20),panel.border  = element_rect(colour = "white"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.text = element_text(size = 16))
+  
+```
+
+# Driver analysis 
+
+```{r}
+
+# load in explanatory variable data 
+var_data <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/preds.feather") %>% 
+select(-type, -distance) %>%
+filter(Hylak_id %in% trends$Hylak_id) %>% 
+distinct(Hylak_id, .keep_all = TRUE) %>% 
+left_join(trends) %>%
+  mutate(Development = PctUrbHi2006Cat + PctUrbLo2006Cat + PctUrbMd2006Cat, 
+         Forest = PctMxFst2006Cat + PctDecid2006Cat + PctConif2006Cat, 
+         Wetland = PctWdWet2006Cat + PctHbWet2006Cat )
+
+# add in hydrolakes data 
+Hydrolakes <- read_sf("C:/Users/samsi/desktop//thesis/HydroLAKES_polys_v10_shp/HydroLAKES_polys_v10.shp") %>% 
+  filter(Hylak_id %in% var_data$Hylak_id) %>% 
+  select(Hylak_id, Depth_avg, Slope_100, Res_time, Vol_total, Lake_area)
+
+var_data <- left_join(var_data, Hydrolakes, by = 'Hylak_id')
+
+
+```
+
+
+```{r}
+predictors <- c("lake_elevation_m",  "Tmean8110Cat",      "ClayCat", 
+"BFICat",           "CatAreaSqKm",       "PctAg2006Slp10Cat",     "HydrlCondCat",    
+"Wetland",
+"KffactCat",         "NO3_2008Cat",       "RunoffCat", 
+"WtDepCat", "Forest", "Development", "Depth_avg", "Slope_100", "Res_time", "Vol_total", "Lake_area")
+
+response <- "trend"
+
+ctrl_default <- trainControl(method="cv", number = 3, savePredictions = TRUE)
+set.seed(100)
+
+var_data <- var_data %>% as.data.frame() 
+
+## Set up our data partitoins
+train_d = var_data %>% filter(!lagoslakeid %in% val_ids$lagoslakeid) %>%  mutate_if(is.numeric, round, digits=2)
+
+test_d = var_data %>% filter(lagoslakeid %in% val_ids$lagoslakeid) %>%  mutate_if(is.numeric, round, digits=2)
+
+trControl <- trainControl(method = "cv",
+                          number = 10,
+                          search = "grid")
+set.seed(100)
+
+
+rf_default <- train(x = train_d[,predictors],
+                    y = train_d[,response],
+                    method = "rf",
+                    metric = "Accuracy",
+                    trControl = trControl)
+
+# Print the results
+print(rf_default)
+#Step 2) Search best mtry
+tuneGrid <- expand.grid(.mtry = c(10: 20))
+rf_mtry <- train(x = train_d[,predictors],
+                 y = train_d[,response],
+                 method = "rf",
+                 metric = "Accuracy",
+                 tuneGrid = tuneGrid,
+                 trControl = trControl,
+                 importance = TRUE,
+                 nodesize = 14,
+                 ntree = 300)
+
+print(rf_mtry)
+rf_mtry$bestTune$mtry #best value
+best_mtry <- rf_mtry$bestTune$mtry 
+best_mtry
+#3) search the best maxnodes
+store_maxnode <- list()
+tuneGrid <- expand.grid(.mtry = best_mtry)
+for (maxnodes in c(5: 20)) {
+  set.seed(1234)
+  rf_maxnode <- train(x = train_d[,predictors],
+                      y = train_d[,response],
+                      method = "rf",
+                      metric = "Accuracy",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl,
+                      importance = TRUE,
+                      nodesize = 14,
+                      maxnodes = maxnodes,
+                      ntree = 300)
+  current_iteration <- toString(maxnodes)
+  store_maxnode[[current_iteration]] <- rf_maxnode
+}
+results_mtry <- resamples(store_maxnode)
+summary(results_mtry)
+#Step 4) Search the best ntrees
+store_maxtrees <- list()
+for (ntree in c(250, 300, 350, 400, 450, 500, 550, 600, 800, 1000, 2000)) {
+  set.seed(5678)
+  rf_maxtrees <- train(x = train_d[,predictors],
+                       y = train_d[,response],                       method = "rf",
+                       metric = "Accuracy",
+                       tuneGrid = tuneGrid,
+                       trControl = trControl,
+                       importance = TRUE,
+                       nodesize = 10,
+                       maxnodes = 7,
+                       ntree = ntree)
+  key <- toString(ntree)
+  store_maxtrees[[key]] <- rf_maxtrees
+}
+results_tree <- resamples(store_maxtrees)
+summary(results_tree)
+
+
+fit_rf <- randomForest(x = train_d[,predictors],
+                       y = train_d[,response],       
+                       method = "rf",
+                       metric = "Accuracy",
+                       tuneGrid = tuneGrid,
+                       trControl = trControl,
+                       importance = TRUE,
+                       nodesize = 10,
+                       ntree = 300,
+                       maxnodes = 7)
+
+
+prediction <-predict(fit_rf, test_d)
+
+confMatRF<-confusionMatrix(prediction, test_d$trend)
+
+
+varImpPlot(fit_rf)
+
+imp_df<-importance(fit_rf)
+
+imp_df
+
+vip(fit_rf, geom = "col", horizontal = TRUE, size = 1.5, plot.engine="ggplot2", num_features = 5)
+
+```
+
+# This chunk makes figure 6 
+```{r}
+Figure5 <- var_data %>% 
+  select(Res_time, Tmean8110Cat, Slope_100, RunoffCat, ClayCat, trend)
+
+trendColors <- c('no trend' =  '#698c86', 'trending oligotrophic' = '#2158bc', 'trending eutrophic' = '#7dae38')
+
+
+Restime <- ggplot(Figure5, aes(x = trend, y = Res_time)) +
+  #geom_point() +
+  #geom_pointrange(aes(ymin = quant25, ymax = quant75)) +
+  geom_boxplot(outlier.shape = NA) +
+    geom_jitter(
+      aes(fill = trend),
+      shape = 21,
+      size = 1.5,
+      alpha = 0.6,
+      position = position_jitter(0.2)
+    ) +  
+  ylab("Residence Time") + 
+  ylim(0, 10000) +
+  scale_fill_manual(values = trendColors) + 
+theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
+        legend.position = 'none', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 16))
+
+Tmean <- ggplot(Figure5, aes(x = trend, y = Tmean8110Cat)) +
+  #geom_point() +
+  #geom_pointrange(aes(ymin = quant25, ymax = quant75)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(
+    aes(fill = trend),
+    shape = 21,
+    size = 1.5,
+    alpha = 0.6,
+    position = position_jitter(0.2)
+  ) +  
+  ylab("30 Year Mean Temp") +
+  scale_fill_manual(values = trendColors) + 
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
+        legend.position = 'none', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 16))
+
+Slope <- ggplot(Figure5, aes(x = trend, y = Slope_100)) +
+  #geom_point() +
+  #geom_pointrange(aes(ymin = quant25, ymax = quant75)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(
+    aes(fill = trend),
+    shape = 21,
+    size = 1.5,
+    alpha = 0.6,
+    position = position_jitter(0.2)
+  ) +  
+  ylab("Slope") +
+  scale_fill_manual(values = trendColors) + 
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
+        legend.position = 'none', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 16))
+
+Runoff <- ggplot(Figure5, aes(x = trend, y = RunoffCat)) +
+  #geom_point() +
+  #geom_pointrange(aes(ymin = quant25, ymax = quant75)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(
+    aes(fill = trend),
+    shape = 21,
+    size = 1.5,
+    alpha = 0.6,
+    position = position_jitter(0.2)
+  ) +  
+  ylab( "Runoff") +
+  scale_fill_manual(values = trendColors) + 
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
+        legend.position = 'none', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 16))
+
+ClayCat <- ggplot(Figure5, aes(x = trend, y = ClayCat)) +
+  #geom_point() +
+  #geom_pointrange(aes(ymin = quant25, ymax = quant75)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(
+    aes(fill = trend),
+    shape = 21,
+    size = 1.5,
+    alpha = 0.6,
+    position = position_jitter(0.2)
+  ) +  
+  ylab( "% Clay") +
+  scale_fill_manual(values = trendColors) + 
+    guides(fill = guide_legend(override.aes = list(size=5)))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
+        legend.position = 'bottom', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 14), legend.title = element_blank(), legend.text = element_text(size = 14))
+
+ggarrange(Restime, Tmean, Slope, Runoff, ClayCat, nrow = 5, heights = c(5,5), align = "v")
+
+```
+
+# This chunk makes figure 6
+```{r}
+myDF <- data.frame(variables = row.names(imp_df), imp_df)
+
+renamer <- tibble(variables = c(
+  "lake_elevation_m",  "Tmean8110Cat",      "ClayCat", 
+"BFICat",  "CatAreaSqKm",       "PctAg2006Slp10Cat",     "HydrlCondCat",    
+"Wetland",
+"KffactCat", "NO3_2008Cat",       "RunoffCat", 
+"WtDepCat", "Forest", "Development", "Depth_avg", "Slope_100", "Res_time", "Vol_total", "Lake_area"),
+  
+  namesNew = c(
+    "Lake Elevation",  "30 Year Mean Temp", "% Clay Content", "Base Flow Index (% of Total Flow)",  "Area of Catchment (Sq Km)","% Agricultural Land on Slopes > 20%", 
+    "Hydraulic Conductivity",  "% Wetland",    "Kffactor",         "Mean Wet Deposition of Nitrate (kg/ha/yr)",       "Runoff", "Water Table Depth",      
+    "% Forest",    "% Development", "Lake Depth","Slope", "Residence Time",  "Total Volume (million cubic meters)",  "Lake Area" )) 
+
+myDF <- left_join(myDF, renamer)
+
+no_trend <- myDF %>% select(variables, no.trend, namesNew) %>% 
+  filter(variables %in% c('Tmean8110Cat', 'HydrlCondCat', 'Slope_100', 'Forest','BFICat')) %>% 
+  mutate(names2 = fct_reorder(namesNew, no.trend))
+
+no_trend_var_imp <- ggplot(no_trend) +
+  geom_col(aes(y = names2, x = no.trend), width = 0.5) +
+  theme_bw() + 
+  xlab("Mean Decrease in Accuracy") + 
+  labs(title = "A) No trend")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.title = element_text(face = "bold"), axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 14), axis.title.x = element_text(size = 16), axis.title.y = element_blank(), title = element_text(size = 16))
+
+inc_oligotrophic <- myDF %>% select(variables, trending.oligotrophic, namesNew) %>% 
+  filter(variables %in% c('Res_time', 'ClayCat', 'Development', 'Vol_total','CatAreaSqKm')) %>% 
+  mutate(names2 = fct_reorder(namesNew, trending.oligotrophic))
+
+inc_oligotrophic_var_imp <- ggplot(inc_oligotrophic) +
+  geom_col(aes(y = names2, x = trending.oligotrophic), width = 0.5) +
+  theme_bw() + 
+  xlab("Mean Decrease in Accuracy") + 
+  labs(title = "B) Trending Oligotrophic") + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.title = element_text(face = "bold"), axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 14), axis.title.x = element_text(size = 16), axis.title.y = element_blank(), title = element_text(size = 16))
+
+
+inc_eutrophic <- myDF %>% select(variables, trending.eutrophic, namesNew)%>% 
+  filter(variables %in% c('PctAg2006Slp10Cat', 'Depth_avg', 'lake_elevation_m', 'BFICat','HydrlCondCat')) %>% 
+  mutate(names2 = fct_reorder(namesNew, trending.eutrophic))
+
+inc_eutrophic_var_imp <- ggplot(inc_eutrophic) +
+  geom_col(aes(y = names2, x = trending.eutrophic), width = 0.5) +
+  theme_bw() + 
+  xlab("Mean Decrease in Accuracy") + 
+  labs(title = "C) Trending Eutrophic") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.title = element_text(face = "bold"), axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 14), axis.title.x = element_text(size = 16), axis.title.y = element_blank(), title = element_text(size = 16))
+
+#Figure 6
+ggarrange(no_trend_var_imp, inc_oligotrophic_var_imp, inc_eutrophic_var_imp, nrow = 3, heights = c(4, 4), align = "v")
+```
+
+# Make correlation matrix for supplementary material 
+```{r}
+corr_data <- var_data %>% 
+select("lake_elevation_m",  "Tmean8110Cat",      "ClayCat", 
+"BFICat",  "CatAreaSqKm",       "PctAg2006Slp10Cat",     "HydrlCondCat",    
+"Wetland",
+"KffactCat", "NO3_2008Cat",       "RunoffCat", 
+"WtDepCat", "Forest", "Development", "Depth_avg", "Slope_100", "Res_time", "Vol_total", "Lake_area")
+
+mydata.corr = cor(corr_data, method = c("spearman"))
+
+# Figure 7
+corrplot(mydata.corr, type = 'lower',  tl.col = 'black', diag = FALSE, tl.cex = 1.5)
+```

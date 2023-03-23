@@ -233,3 +233,22 @@ example_trends_plot
 
 ```
 
+# Examine the distribution of intensity of trophic state change across lakes becoming more eutrophic and those becoming more oligotrophic (Figure S1)
+```{r}
+
+oligotrophic_intensity <- ggplot(trending_oligotrophic, aes(x=oligotrophic_delta)) + 
+  geom_histogram(binwidth=20, fill = 'grey60', colour = 'black') + 
+  labs(x = "Change in % Oligotrophic", y  = 'Frequency', title = 'A) Lakes Trending Oligotrophic') +
+ theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),legend.title = element_blank(), axis.title = element_text(size = 30), axis.text = element_text(size = 24, color = 'black'), legend.text = element_text(size = 30), title = element_text(size = 30), legend.position = "bottom")
+
+eutrophic_intensity <- ggplot(trending_eutrophic, aes(x=eutrophic_delta)) + 
+  geom_histogram(binwidth=20, fill = 'grey60', colour = 'black') + 
+  labs(x = "Change in % Eutrophic", y  = 'Frequency', title = 'A) Lakes Trending Oligotrophic') +
+   theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),legend.title = element_blank(), axis.title = element_text(size = 30), axis.text = element_text(size = 24, color = 'black'), legend.text = element_text(size = 30), title = element_text(size = 30), legend.position = "bottom")
+
+Figure_S1 <- ggarrange(oligotrophic_intensity, eutrophic_intensity, nrow = 2)
+
+Figure_S1
+```
