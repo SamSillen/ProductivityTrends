@@ -205,7 +205,7 @@ ggplot(plot, aes(Prediction,Reference, fill= Frequency)) +
 
 # 5) Explore feature importance
 ```{r}
-#load("C:/Users/samsi/Desktop/final_model.rds")
+load("C:/Users/samsi/Desktop/final_model.rds")
 
 imp <- xgb.importance(model = final_model)
 
