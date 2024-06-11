@@ -1,5 +1,5 @@
 ---
-title: "Aquasat_LAGOS_NHD_LakeCat_Merge"
+title: "04_Assemble_Prediction_Data"
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -33,19 +33,17 @@ sf_use_s2(FALSE)
 
 #1) Read in nhd data for lakes within the roi of this study (WY, ID, UT, MT, CO)
 
-#2) Read in LAGOS LOCUS (lake location) data within the roi of this study, and join it to nhd lakes using st_intersects (NOTE: nhd has the polygons, whereas everything else hereafter containing spatial data will be points, therefore joining will have to require joining the point data to the lake polygon data do prevent misjoins)
+#2) Read in LAGOS LOCUS (lake location) data within the roi of this study, and join it to nhd lakes using st_intersects 
 
-#3) Read in the LimnoSat lake metadata (basically, Hylak_ids) and join it to the comids_lagos_roi df using the same methodology as #2, then join to Limnosat via "Hylak_id'
+#3) Read in the LimnoSat lake metadata (Hylak_ids) and join it to the nhd + LAGOS
 
 #4) Add lakeCat metrics using the common identifier 'COMID'
 
 #5) Add in climate data (lake temperature and wind speed)
 
-
-
 ```
 
-#1) NHD Data
+NHD Data
 ```{r}
 
 states <- states(cb = TRUE)
@@ -54,6 +52,7 @@ roi <- subset(states, states$NAME == 'Montana' | states$NAME == 'Idaho' | states
 st_transform(st_crs(4326))
 
 #this is the limnosat point data connected to hylak id
+#https://zenodo.org/records/4139695
 
 limnosat_dp <- read_sf("C:/Users/samsi/OneDrive - University of Pittsburgh/LimnoSat/HydroLakes_DP.shp") %>% 
 filter(type == 'dp')
@@ -62,29 +61,29 @@ limnosat_roi <- st_join(limnosat_dp, roi, left = FALSE) %>%
   select(-STATEFP, -STATENS, -AFFGEOID, -GEOID, -STUSPS, -LSAD, -ALAND, -AWATER) 
 ```
 
-2) Pull NHD COMIDS from Intermountain West states, join to join to the limnosat roi via st_intersects
+Pull NHD COMIDS from Intermountain West states, join to join to the limnosat roi via st_intersects
 ```{r}
-nhdplusTools::nhdplus_path("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/nhd/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb")
+states <- c('Wyoming', 'Montana', 'Colorado', 'Idaho', 'Utah')
 
-nhd_paths <- nhdplusTools::stage_national_data(output_path = 'C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/nhd/NHDPlusNationalData')
+nhdplusTools::nhdplus_path("C:/Users/samsi/OneDrive - University of Pittsburgh/nhd_data/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb")
 
-lakes <- sf::st_read(dsn="C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/nhd/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb", layer = "NHDWaterbody") %>%
-  filter(FTYPE == 'LakePond' | FTYPE == 'Reservoir') %>%
+lakes <- sf::st_read(dsn="C:/Users/samsi/OneDrive - University of Pittsburgh/nhd_data/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb", layer = "NHDWaterbody") %>%
+  filter(FTYPE %in% c("LakePond", "Reservoir")) %>%
   st_transform(st_crs(limnosat_roi))
 
 limnosat_roi <- st_join(limnosat_roi, lakes, join = st_intersects)
 
-limnosat_roi <- limnosat_roi %>% filter(!is.na(COMID)) # ~500 observations are not within nhd polygons 
+limnosat_roi <- limnosat_roi %>% filter(!is.na(COMID)) 
 ```
 
-#Adding lagos data , I only need a few things here: lagoslakeID, nhdid, 
+Add lagos data , I only need a few things here: lagoslakeID, nhdid, 
 ```{r}
-lagos_roi <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/lake_information.csv") %>%
+lagos_roi <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/lake_information.csv") %>%
   filter(lake_centroidstate == 'WY' | lake_centroidstate == 'CO' | lake_centroidstate == 'ID' | lake_centroidstate == 'MT' |  
          lake_centroidstate == 'UT') %>%
   st_as_sf(coords=c("lake_lon_decdeg","lake_lat_decdeg"), crs=4326, remove=FALSE)  %>%
   select(lagoslakeid, lake_nhdid, lake_elevation_m, lake_lon_decdeg, lake_lat_decdeg) %>%
-  st_transform(st_crs(aquasat_roi)) %>%
+  st_transform(st_crs(limnosat_roi)) %>%
   st_join(lakes) %>%
   select(lagoslakeid, COMID, lake_nhdid, lake_elevation_m) %>%
   as_tibble() %>% 
@@ -94,7 +93,7 @@ limnosat_roi <- left_join(limnosat_roi, lagos_roi, by = 'COMID')
 ```
 
 
-#4) Limnosat-US data
+Attach Limnosat-US data
 ```{r}
 ls <- read_feather('C:/Users/samsi/OneDrive - University of Pittsburgh/LimnoSat/LimnoSat_20200628.feather')
 
@@ -102,12 +101,11 @@ limnosat_sr <- left_join(limnosat_roi, ls, by = 'Hylak_id')
 ```
 
 
-
 #4) LakeCat
 ```{r}
 lakeCat <- tibble(COMID = unique(limnosat_sr$COMID))  
 
-lc.files <- list.files('C:/Users/samsi/OneDrive - University of Pittsburgh/lakeCat', full.names = TRUE)
+lc.files <- list.files('C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/lakeCat', full.names = TRUE)
 
 for(i in lc.files){
   if(i == first(lc.files)){
@@ -137,19 +135,20 @@ limnosat_sr <- left_join(limnosat_sr, lakeCat.shrunk, by = 'COMID')
 
 #write a file here in case something goes wrong when adding climate data and I have to re-do
 limnosat_sr <- limnosat_sr %>% select(-geometry.x, -geometry.y)
-write_feather(limnosat_sr,'C:/Users/samsi/Desktop/limnosat_with_lakecat.feather')
+
+#write_feather(limnosat_sr,'C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/limnosat_with_lakecat.feather')
 
 ```
 
-4) Add in lake temperature variables -- this chunk works with very large dfs and can be a pain (most notably transposing the surface temp matrix which takes ages)
+4) Add in lake temperature variables from Willard et al. (2020) https://aslopubs.onlinelibrary.wiley.com/doi/full/10.1002/lol2.10249
 ```{r}
-#limnosat_sr <- read_feather('C:/Users/samsi/Desktop/limnosat_with_lakecat.feather')
+#limnosat_sr <- read_feather('C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/limnosat_with_lakecat.feather')
 
 lake_ids <- limnosat_sr %>%
   select(lake_nhdid) %>%
   distinct(lake_nhdid)
 
-nc_dat <- nc_open("C:/Users/samsi/Desktop/thesis/01_predicted_temp_N24-53_W98-126.nc")
+nc_dat <- nc_open("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/01_predicted_temp_N24-53_W98-126.nc")
 
 #retrieve a matrix of the surf temp data 
 
@@ -182,7 +181,7 @@ site_ids <- site_ids %>%
 #re_apply the nhdhr prefix
 site_ids$nc_siteid = paste0('nhdhr_', site_ids$nc_siteid)
 
-#Have to create a character string of site_ids included in site_ids (this might be weird and convoluted but it worked for me...)
+#Have to create a character string of site_ids included in site_ids
 site_ids <- site_ids %>%
   mutate(blank = 0 )
 
@@ -254,7 +253,7 @@ limnosat_sr <- left_join(limnosat_sr, df.surf_temp, by = c('siteID', 'date'))
 
 # Do same process but for wind speed 
 ```{r}
-nc_dat <- nc_open( "C:/Users/samsi/Desktop/thesis/01_weather_N24-53_W98-126.nc")
+nc_dat <- nc_open( "C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/01_weather_N24-53_W98-126.nc")
 
 print(paste("The file has",nc_dat$nvars,"variables,",nc_dat$ndims,"dimensions and",nc_dat$natts,"NetCDF attributes"))
 
@@ -288,7 +287,7 @@ site_ids <- as.data.frame(nc_siteid)
 
 #Add in lake metadata that links lake ids to weather ids 
 
-metadata <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/lake_metadata.csv")
+metadata <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/lake_metadata.csv")
 
 lagos_ids <- limnosat_sr %>% 
   select(siteID) %>% 
@@ -368,7 +367,7 @@ wind_speed <- wind_speed %>% select(siteID, date, wind) %>%
 
 limnosat_final <- left_join(limnosat_sr, wind_speed, by = c('siteID', 'date'))
 
-write_feather(limnosat_final, "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/limnosat_final.csv")
+write_feather(limnosat_final, "C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/limnosat_final.csv")
 
 ```
 

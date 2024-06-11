@@ -1,5 +1,5 @@
 ---
-title: "Assemble_Training_Data"
+title: "01_Assemble_Training_Data"
 output: html_document
 editor_options: 
   chunk_output_type: inline
@@ -7,6 +7,8 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+
 ```
 
 Required packages
@@ -23,8 +25,6 @@ library(lubridate)
 library(zoo)
 library(USAboundaries)
 
-baseDir <- "C:/Users/samsi/Desktop/WesternMountainsChlPreds/"
-
 sf_use_s2(FALSE)
 
 ```
@@ -34,21 +34,23 @@ Workflow
 
 #1) Read in raw AquaSat file, filter to Intermountain West states
 
-#2) Pull NHD COMIDS from Intermountain West states, join via st_nearest_feature to LAGOS lake charactersitc data then to aquasat roi
+#2) Pull NHD COMIDS from Intermountain West states, join to LAGOS lake charactersitc data then to aquasat roi
 
 #3) Add lakecat vars via COMID
 
 #4) Add in climate data (lake temperature and wind speed)
 ```
 
-1) Read in raw AquaSat file and LAGOS lake information; filter to Intermountain West states through min and max lat longs 
+Read in raw AquaSat file and LAGOS lake information; filter to Intermountain West states 
 ```{r}
 
 states <- states(cb = TRUE)
 
 roi <- subset(states, states$NAME == 'Montana' | states$NAME == 'Idaho' | states$NAME == 'Wyoming' | states$NAME == 'Colorado' | states$NAME == 'Utah')
 
-aquasat_raw <- read.csv(paste0(baseDir, "/Data/sr_wq_rs_join.csv")) %>%
+#Aquasat repo: https://figshare.com/articles/dataset/AquaSat/8139383
+
+aquasat_raw <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/sr_wq_rs_join.csv") %>%
   filter(type == 'Lake') %>% # I would keep river data but temperature / wind speed data only available for lakes 
   drop_na(chl_a) %>% 
   st_as_sf(coords = c('long', 'lat'), crs = 4326 ) %>%
@@ -56,54 +58,49 @@ aquasat_raw <- read.csv(paste0(baseDir, "/Data/sr_wq_rs_join.csv")) %>%
 
 aquasat_roi <- st_join(aquasat_raw, roi, left = FALSE) %>%
   select(-STATEFP, -STATENS, -AFFGEOID, -GEOID, -STUSPS, -LSAD, -ALAND, -AWATER) 
-aquasat_roi$SiteID
 
 data_map <- aquasat_roi %>% 
   group_by(SiteID) %>%
   summarise(Count = n()) %>%
   st_transform(2163)
 
-usa <- us_states() %>%
-  st_transform(2163) %>%
-  filter(state_abbr %in% c("WY", "ID", "MT", "CO", "UT"))
-
 # plot matchup sites
 ggplot() +
-  geom_sf(data=usa, color="blue", fill="white") +
+  geom_sf(data=roi, color="blue", fill="white") +
   geom_sf(data=data_map, aes(color=Count), alpha=0.5, size=0.8) +
   #geom_sf(data=huc2_basins, color="black", fill="NA", size=0.5)
-  theme(legend.position = c(0.98, 0.29),
-    line = element_blank(), 
+  theme(line = element_blank(), 
     rect = element_blank(), 
     axis.text = element_blank(),
     axis.ticks = element_blank(),
     plot.background = element_blank(),
     legend.text = element_text(size=9))
 
-#Note, 1389 observations in aquasat roi ; check if there are any duplicates here ? 
+#Note, 1389 observations in aquasat roi ; check if there are any duplicates here 
 
 aquasat_roi <- aquasat_roi %>% distinct(SiteID, blue, green, red, date, chl_a, .keep_all = TRUE)
 
+# 1389 observations remain, no duplicates
 ```
 
-2) Pull NHD COMIDS from Intermountain West states, join to join to the aquasat roi via st_intersects
+Pull NHD COMIDS from Intermountain West states, join to join to the aquasat roi via st_intersects
 ```{r}
 states <- c('Wyoming', 'Montana', 'Colorado', 'Idaho', 'Utah')
 
-nhdplusTools::nhdplus_path("C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/nhd/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb")
+nhdplusTools::nhdplus_path("C:/Users/samsi/OneDrive - University of Pittsburgh/nhd_data/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb")
 
-nhd_paths <- nhdplusTools::stage_national_data(output_path = 'C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/nhd/NHDPlusNationalData')
-
-lakes <- sf::st_read(dsn="C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/nhd/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb", layer = "NHDWaterbody") %>%
+lakes <- sf::st_read(dsn="C:/Users/samsi/OneDrive - University of Pittsburgh/nhd_data/NHDPlusNationalData/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb", layer = "NHDWaterbody") %>%
   filter(FTYPE %in% c("LakePond", "Reservoir"))
 
 aquasat_roi <- st_join(aquasat_roi, lakes, join = st_intersects)
 ```
 
 
-#Adding lagos data , I only need a few things here: lagoslakeID, nhdid, 
+# Add lagos data , I only need a few things here: lagoslakeID, nhdid (for climate / wind data)
 ```{r}
-lagos_roi <- read.csv(paste0(baseDir,"/Data/lake_information.csv")) %>%
+#lagos data: https://lagoslakes.org/
+
+lagos_roi <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/lake_information.csv") %>%
   filter(lake_centroidstate == 'WY' | lake_centroidstate == 'CO' | lake_centroidstate == 'ID' | lake_centroidstate == 'MT' |  
          lake_centroidstate == 'UT') %>%
   st_as_sf(coords=c("lake_lon_decdeg","lake_lat_decdeg"), crs=4326, remove=FALSE)  %>%
@@ -115,15 +112,16 @@ lagos_roi <- read.csv(paste0(baseDir,"/Data/lake_information.csv")) %>%
   distinct(COMID, .keep_all = TRUE)
 
 aquasat_roi <- left_join(aquasat_roi, lagos_roi, by = 'COMID')
+
 ```
 
-3) Add LakeCat data to aquasat roi for final df
+Add LakeCat data to aquasat roi for final df
 ```{r}
 lakeCat <- tibble(COMID = unique(aquasat_roi$COMID))  
 
 lakeCat$COMID <- as.double(lakeCat$COMID)
 
-lc.files <- list.files('C:/Users/samsi/OneDrive - University of Pittsburgh/lakeCat', full.names = TRUE)
+lc.files <- list.files('C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/lakeCat', full.names = TRUE)
 
 for(i in lc.files){
   if(i == first(lc.files)){
@@ -157,9 +155,9 @@ training <- left_join(aquasat_roi, lakeCat.shrunk, by = 'COMID')
 
 ```
 
-4) Add in lake temperature variables    
+Add in lake temperature variables from Willard et al. (2020) https://aslopubs.onlinelibrary.wiley.com/doi/full/10.1002/lol2.10249
 ```{r}
-nc_dat <- nc_open(paste0(baseDir, "/Data/01_predicted_temp_N24-53_W98-126.nc"))
+nc_dat <- nc_open("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/01_predicted_temp_N24-53_W98-126.nc")
 
 #retrieve a matrix of the surf temp data 
 
@@ -193,7 +191,7 @@ site_ids <- site_ids %>%
 #re_apply the nhdhr prefix
 site_ids$nc_siteid = paste0('nhdhr_', site_ids$nc_siteid)
 
-#Have to create a character string of site_ids included in site_ids (this might be weird and convoluted but it worked for me...)
+#Have to create a character string of site_ids included in site_ids 
 
 site_ids <- site_ids %>%
   mutate(blank = 0 )
@@ -268,17 +266,14 @@ training <- training %>%
 #Join to training data
 training <- left_join(training, df.surf_temp, by = c('siteID', 'date'))
 
-#Clean up work env.
-
-#remove vars from work environment
-rm(df.surf_temp, lagos_roi, lakeCat, lakeCat.full, lakeCat.shrunk, lakes, lc, nhd_paths, roi, lc.files, tday, tdstr, tmonth, tunits, tustr, tyear, nc_dat, round.1, round1, states)
+#Clean up work enb; remove vars from work environment
+rm(df.surf_temp, lagos_roi, lakeCat, lakeCat.full, lakeCat.shrunk, lakes, lc, roi, lc.files, tday, tdstr, tmonth, tunits, tustr, tyear, nc_dat, round.1, round1, states)
 ```
 
 # Do same process but for wind speed 
 ```{r}
 
-
-nc_dat <- nc_open(paste0(baseDir, "/Data/01_weather_N24-53_W98-126.nc"))
+nc_dat <- nc_open("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/01_weather_N24-53_W98-126.nc")
 
 print(paste("The file has",nc_dat$nvars,"variables,",nc_dat$ndims,"dimensions and",nc_dat$natts,"NetCDF attributes"))
 
@@ -312,7 +307,7 @@ site_ids <- as.data.frame(nc_siteid)
 
 #Add in lake metadata that links lake ids to weather ids 
 
-metadata <- read.csv(paste0(baseDir,"Data/lake_metadata.csv"))
+metadata <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/lake_metadata.csv")
 
 lagos_ids <- training %>% 
   select(siteID)
@@ -400,7 +395,8 @@ training$date <- as_date(training$date)
 training <- left_join(training, wind_speed, by = c('siteID', 'date')) %>% 
   select(-geometry.y) # Clean up by removing geometry column
 
-write.csv(training, "C:/Users/samsi/Desktop/WesternMountainsChlPreds/Data/training.csv", row.names  = FALSE)
+#write final training file 
+write.csv(training, "C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/training_final.csv", row.names  = FALSE)
 
 ```
 

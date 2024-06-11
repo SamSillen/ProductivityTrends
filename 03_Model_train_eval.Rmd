@@ -9,7 +9,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-#Workflow
+Workflow
 ```{r}
 
 ## 1) Read in training file ; filter, calculate band ratios, and remove correlated variables 
@@ -23,6 +23,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## 4) Train final model with best params , look at evaluation metrics from test data
 
+## 5) Explore feature importance 
+
+## 6) Use model to predict on limnosat 
 ```
 
 Packages
@@ -32,23 +35,19 @@ library(xgboost)
 library(caret)
 library(ggplot2)
 library(colorscience)
-#library(htmlTable)
-#library(extrafont)
 ```
 
 # 1) Read in training file ; filter, calculate band ratios, and remove correlated variables 
 ```{r}
 
-baseDir <- "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/"
+training <- read.csv("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/training_standardized.csv")
 
-training <- read.csv("data/training_Standardized.csv") 
-
-source(paste0(baseDir,'ML_utils.R'))
+source("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/ML_utils.R")
 
 training <- training %>%
   filter(pixelCount > 9, 
          clouds < 50,    
-         across(c(blue, green, red, nir, swir1, swir2), ~ .x > 0 & .x < 2000)) %>% # taken from Simon Code (reasonable reflectance values ?)
+         across(c(blue, green, red, nir, swir1, swir2), ~ .x > 0 & .x < 2000)) %>% # taken from limnosat Code (reasonable reflectance values)
   mutate(dWL = fui.hue(red, green, blue),
          red_to_blue = red/blue,
          red_to_nir = red/nir,
@@ -79,11 +78,11 @@ reduced_Data = corr.matrix[,-c(hc)]
 
 #select only uncorrelated optical variables + climate data and data necessary to train model (id, chl_a)
 data <- training %>%
-  select(blue, dWL, nir, swir2, red_to_blue, red_to_nir, nir_to_red, green_to_blue, nir_sac, nir_min_red, chl_a, lagoslakeid,id, temp_mean_14_day, date, wind, red_min_green, EVI, GCI)
+  select(blue, dWL, nir, swir2, red_to_blue, red_to_nir, nir_to_red, green_to_blue, nir_sac, nir_min_red, chl_a, lagoslakeid,id, temp_mean_14_day, date, wind, red_min_green, EVI, GCI, WQP_siteID)
 
 #check for dups by using distinct
 dup_test <- data %>%
-  distinct(blue, nir, chl_a, WQP_SiteID, date, .keep_all =  TRUE)
+  distinct(blue, nir, chl_a, WQP_siteID, date, .keep_all =  TRUE)
 
 #Create categories for trophic state based on thresholds     
 data$in_situ_cat <- cut(data$chl_a, breaks = c(0, 2.6, 7, 200), labels = c('oligotrophic', 'mesotrophic', 'eutrophic'))
@@ -168,7 +167,7 @@ best_params <- list(booster = "gbtree", objective = 'multi:softmax',
 final_model <- xgb.train(params = best_params, data = dtrain, nrounds = 2000, 
                          print_every_n = 20, num_class = 3)
 
-saveRDS(final_model, "C:/Users/samsi/OneDrive - University of Pittsburgh/final_model.rds")
+#saveRDS(final_model, "C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/final_model.rds")
 
 test <- test %>%
   mutate(trophic_predicted = predict(final_model, dtest),
@@ -205,7 +204,7 @@ ggplot(plot, aes(Prediction,Reference, fill= Frequency)) +
 
 # 5) Explore feature importance
 ```{r}
-load("C:/Users/samsi/Desktop/final_model.rds")
+#load("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/final_model.rds")
 
 imp <- xgb.importance(model = final_model)
 
@@ -232,25 +231,22 @@ theme(axis.text.x=element_text(size=15, colour = 'black'),panel.grid.minor = ele
 # 6) Predict model 
 ```{r}
 
-sr_final <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/limnosat_final.csv")
+sr_final <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/limnosat_final.csv")
 
-baseDir <- "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/"
-
-source(paste0(baseDir,'ML_utils.R'))
-
-
-corr_coef <- read_csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/corr_coef_limnosat_filtered.csv")
+corr_coef <- read_csv("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/corr_coef.csv")
 
 correction_coef_99 <- corr_coef %>%
   filter(fit %in% c(NA, "98_quant")) %>%
   dplyr::select(-fit) %>%
   mutate(band = tolower(band))
 
+correction_coef_99$sat <- as.character(correction_coef_99$sat)
+
 #add features for model training 
 preds <- sr_final %>%
   rename_at(vars(Blue, Green, Red, Nir, Swir1, Swir2), tolower) %>%
   filter(pCount_dswe1 > 9,
-         across(c(blue, green, red, nir, swir1, swir2), ~ .x > 0 & .x < 2000)) %>% # taken from Simon Code (reasonable reflectance values)
+         across(c(blue, green, red, nir, swir1, swir2), ~ .x > 0 & .x < 2000)) %>% # reasonable reflectance values for water 
   mutate(rn = row_number()) %>%
   mutate(sat = as.character(sat)) %>%
   gather(red ,green, blue, nir, swir1, swir2, key='band', value='value') %>%
@@ -288,5 +284,5 @@ preds <- preds %>%
   drop_na(temp) %>%
   mutate(pred = predict(final_model, as.matrix(preds[,feats])))
 
-write_feather(preds, "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/preds.feather")
+write_feather(preds, "C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/preds.feather")
 ```

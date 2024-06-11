@@ -19,6 +19,8 @@ library(randomForest)
 library(caret)
 library(vip)
 library(corrplot)
+library(leafgl)
+library(raster)
 ```
 
 # Make trend map (Figure 4)
@@ -39,14 +41,14 @@ grob5 <- grobTree(textGrob("COLORADO", x=0.82,  y=0.2, hjust=0,
                            gp=gpar(col="#8a8a8a", fontsize=13)))
 
 # get location data 
-lakes <- read_sf("C:/Users/samsi/OneDrive - University of Pittsburgh/LimnoSat/HydroLakes_DP.shp") %>%
+lakes <- read_sf("/Users/samsillen/OneDrive - University of Pittsburgh/LimnoSat/HydroLakes_DP.shp") %>%
 filter(type == 'dp') 
 
 # load in trend data , join to location data
-trends <- read_csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/data/trends.csv")%>% 
+trends <- read_csv("/Users/samsillen/OneDrive - University of Pittsburgh/WRR_final/Data/trends.csv")%>% 
+  
 left_join(lakes) %>% 
 st_as_sf()
-library(leafgl)
 
 pal <- colorFactor(c( '#2158bc',  '#698c86', '#7dae38'), domain = c("improving", "no change", "worsening" ))
 
@@ -71,11 +73,9 @@ ggplot()+
 ```
 
 # Driver analysis 
-
 ```{r}
-
 # load in explanatory variable data 
-var_data <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/preds.feather") %>% 
+var_data <- read_feather("/Users/samsillen/OneDrive - University of Pittsburgh/WRR_final/Data/preds.feather") %>% 
 select(-type, -distance) %>%
 filter(Hylak_id %in% trends$Hylak_id) %>% 
 distinct(Hylak_id, .keep_all = TRUE) %>% 
@@ -85,15 +85,12 @@ left_join(trends) %>%
          Wetland = PctWdWet2006Cat + PctHbWet2006Cat )
 
 # add in hydrolakes data 
-Hydrolakes <- read_sf("C:/Users/samsi/desktop/backup/thesis/HydroLAKES_polys_v10_shp/HydroLAKES_polys_v10.shp") %>% 
-  filter(Hylak_id %in% var_data$Hylak_id) %>% 
-  select(Hylak_id, Depth_avg, Slope_100, Res_time, Vol_total, Lake_area)
+Hydrolakes <- read_sf("/Users/samsillen/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/HydroLAKES_polys_v10_shp/HydroLAKES_polys_v10.shp") %>% 
+  dplyr::filter(Hylak_id %in% var_data$Hylak_id) %>% 
+  dplyr::select(Hylak_id, Depth_avg, Slope_100, Res_time, Vol_total, Lake_area)
 
 var_data <- left_join(var_data, Hydrolakes, by = 'Hylak_id')
-
-
 ```
-
 
 ```{r}
 predictors <- c("lake_elevation_m",  "Tmean8110Cat",      "ClayCat", 
@@ -202,12 +199,12 @@ vip(fit_rf, geom = "col", horizontal = TRUE, size = 1.5, plot.engine="ggplot2", 
 # This chunk makes figure 5 
 ```{r}
 Figure5 <- var_data %>% 
-  select(Res_time, Forest, Tmean8110Cat, BFICat, RunoffCat, trend) 
+  dplyr::select(Res_time, Forest, Tmean8110Cat, BFICat, RunoffCat, trend) 
 
 trendColors <- c('no trend' =  '#698c86', 'trending oligotrophic' = '#2158bc', 'trending eutrophic' = '#7dae38')
 
 Restime <- Figure5 %>% 
-select(trend, Res_time) %>% 
+dplyr::select(trend, Res_time) %>% 
 group_by(trend) %>% 
 mutate(Res_time_filtered = case_when(Res_time - quantile(Res_time)[4] > 1.5*IQR(Res_time) ~ NA_real_,
                                   quantile(Res_time)[2] - Res_time > 1.5*IQR(Res_time) ~ NA_real_,
@@ -229,10 +226,10 @@ Restime_plot <- ggplot(Restime, aes(x = trend, y = Res_time_filtered)) +
   scale_fill_manual(values = trendColors) + 
 theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
-        legend.position = 'none', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 16))
+        legend.position = 'none', legend.text = element_text(face = 'bold'), axis.title.y = element_text(size = 14, face = 'bold'), axis.text.x = element_blank(), axis.title = element_text(size = 16))
 
 Tmean <- Figure5 %>% 
-select(trend, Tmean8110Cat) %>% 
+dplyr::select(trend, Tmean8110Cat) %>% 
 group_by(trend) %>% 
 mutate(Tmean_filtered = case_when(Tmean8110Cat - quantile(Tmean8110Cat)[4] > 1.5*IQR(Tmean8110Cat) ~ NA_real_,
                                   quantile(Tmean8110Cat)[2] - Tmean8110Cat > 1.5*IQR(Tmean8110Cat) ~ NA_real_,
@@ -253,11 +250,11 @@ Tmean_plot <- ggplot(Tmean, aes(x = trend, y = Tmean_filtered)) +
   scale_fill_manual(values = trendColors) + 
   theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
-        legend.position = 'none', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 16))
+        legend.position = 'none', legend.text = element_text(face = 'bold'), axis.title.y = element_text(size = 14, face = 'bold'), axis.text.x = element_blank(), axis.title = element_text(size = 16))
 
 
 Forest <- Figure5 %>% 
-select(trend, Forest) %>% 
+dplyr::select(trend, Forest) %>% 
 group_by(trend) %>% 
 mutate(Forest_filtered = case_when(Forest - quantile(Forest)[4] > 1.5*IQR(Forest) ~ NA_real_,
                                   quantile(Forest)[2] - Forest > 1.5*IQR(Forest) ~ NA_real_,
@@ -280,11 +277,11 @@ Forest_plot <- ggplot(Forest, aes(x = trend, y = Forest_filtered)) +
   scale_fill_manual(values = trendColors) + 
   theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
-        legend.position = 'none', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 16))
+        legend.position = 'none', legend.text = element_text(face = 'bold'), axis.title.y = element_text(size = 14, face = 'bold'), axis.text.x = element_blank(), axis.title = element_text(size = 16))
 
 
 BFICat <- Figure5 %>% 
-select(trend, BFICat) %>% 
+dplyr::select(trend, BFICat) %>% 
 group_by(trend) %>% 
 mutate(BFI_filtered = case_when(BFICat - quantile(BFICat)[4] > 1.5*IQR(BFICat) ~ NA_real_,
                                   quantile(BFICat)[2] - BFICat > 1.5*IQR(BFICat) ~ NA_real_,
@@ -306,10 +303,10 @@ BFI_plot <- ggplot(BFICat, aes(x = trend, y = BFI_filtered)) +
   scale_fill_manual(values = trendColors) + 
   theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
-        legend.position = 'none', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 16))
+        legend.position = 'none', legend.text = element_text(face = 'bold'), axis.title.y = element_text(size = 14, face = 'bold'), axis.text.x = element_blank(), axis.title = element_text(size = 16))
 
 Runoff <- Figure5 %>% 
-select(trend, RunoffCat) %>% 
+dplyr::select(trend, RunoffCat) %>% 
 group_by(trend) %>% 
 mutate(Runoff_filtered = case_when(RunoffCat - quantile(RunoffCat)[4] > 1.5*IQR(RunoffCat) ~ NA_real_,
                                   quantile(RunoffCat)[2] - RunoffCat > 1.5*IQR(RunoffCat) ~ NA_real_,
@@ -331,10 +328,11 @@ Runoff_plot <- ggplot(Runoff, aes(x = trend, y = Runoff_filtered)) +
     guides(fill = guide_legend(override.aes = list(size=5)))+
   theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.x  = element_blank(), 
-        legend.position = 'bottom', axis.title.y = element_text(size = 12), axis.text.x = element_blank(), axis.title = element_text(size = 14), legend.title = element_blank(), legend.text = element_text(size = 14))
+        legend.position = 'bottom', legend.title = element_blank(),legend.text = element_text(size = 14), axis.title.y = element_text(size = 14, face = 'bold'), axis.text.x = element_blank(), axis.title = element_text(size = 16))
 
 #arrange the plots
 ggarrange(Restime_plot, Forest_plot, Tmean_plot, BFI_plot, Runoff_plot, nrow = 5, heights = c(5,5), align = "v")
+
 ```
 
 # This chunk makes figure 6
@@ -351,34 +349,42 @@ renamer <- tibble(variables = c(
     "Lake Elevation",  "30 Year Mean Temp", "% Clay Content", "Base Flow Index (% of Total Flow)",  "Area of Catchment (Sq Km)","% Agricultural Land on Slopes > 20%", 
     "Hydraulic Conductivity",  "% Wetland",    "Kffactor",         "Mean Wet Deposition of Nitrate (kg/ha/yr)",       "Runoff", "Water Table Depth",      
     "% Forest",    "% Development", "Lake Depth","Slope", "Residence Time",  "Total Volume (million cubic meters)",  "Lake Area" )) 
+
 myDF <- left_join(myDF, renamer)
+
 no_trend <- myDF %>% select(variables, no.trend, namesNew) %>% 
   filter(variables %in% c('Tmean8110Cat', 'HydrlCondCat', 'Slope_100', 'Forest','BFICat')) %>% 
   mutate(names2 = fct_reorder(namesNew, no.trend))
+
 no_trend_var_imp <- ggplot(no_trend) +
   geom_col(aes(y = names2, x = no.trend), width = 0.5) +
   theme_bw() + 
   xlab("Mean Decrease in Accuracy") + 
   labs(title = "a) No Trend")+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.title = element_text(face = "bold"), axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 14, colour = 'black'), axis.title.x = element_text(size = 16, 'black'), axis.title.y = element_blank(), title = element_text(size = 16))
+
 inc_oligotrophic <- myDF %>% select(variables, trending.oligotrophic, namesNew) %>% 
   filter(variables %in% c('Res_time', 'ClayCat', 'Development', 'lake_elevation_m','Forest')) %>% 
   mutate(names2 = fct_reorder(namesNew, trending.oligotrophic))
+
 inc_oligotrophic_var_imp <- ggplot(inc_oligotrophic) +
   geom_col(aes(y = names2, x = trending.oligotrophic), width = 0.5) +
   theme_bw() + 
   xlab("Mean Decrease in Accuracy") + 
   labs(title = "b) Trending Oligotrophic") + 
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.title = element_text(face = "bold"), axis.text.x = element_text(size = 12, colour = 'black'), axis.text.y = element_text(size = 14, colour = 'black'), axis.title.x = element_text(size = 16), axis.title.y = element_blank(), title = element_text(size = 16))
+
 inc_eutrophic <- myDF %>% select(variables, trending.eutrophic, namesNew)%>% 
   filter(variables %in% c('PctAg2006Slp10Cat', 'CatAreaSqKm', 'NO3_2008Cat', 'Wetland','Forest')) %>% 
   mutate(names2 = fct_reorder(namesNew, trending.eutrophic))
+
 inc_eutrophic_var_imp <- ggplot(inc_eutrophic) +
   geom_col(aes(y = names2, x = trending.eutrophic), width = 0.5) +
   theme_bw() + 
   xlab("Mean Decrease in Accuracy") + 
   labs(title = "c) Trending Eutrophic") +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.title = element_text(face = "bold"), axis.text.x = element_text(size = 12, colour = 'black'), axis.text.y = element_text(size = 14, colour = 'black'), axis.title.x = element_text(size = 16), axis.title.y = element_blank(), title = element_text(size = 16))
+
 #Figure 6
 ggarrange(no_trend_var_imp, inc_oligotrophic_var_imp, inc_eutrophic_var_imp, nrow = 3, heights = c(4, 4), align = "v")
 ```
@@ -405,6 +411,5 @@ rename('Lake Elevation' = lake_elevation_m, '30 Year Mean Temp' =  Tmean8110Cat,
 
 mydata.corr = cor(corr_data, method = c("spearman"))
 
-# Figure 7
 corrplot(mydata.corr, type = 'lower',  tl.col = 'black', diag = FALSE, tl.cex = 1.2)
 ```

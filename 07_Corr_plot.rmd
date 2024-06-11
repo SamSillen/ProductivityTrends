@@ -1,0 +1,210 @@
+---
+output:
+  reprex::reprex_document:
+    venue: "gh"
+    advertise: FALSE
+    session_info: TRUE
+    style: TRUE
+    comment: "#;-)"
+    tidyverse_quiet: FALSE
+    std_out_err: TRUE
+knit: reprex::reprex_render
+---
+
+# Packages
+```{r}
+library(feather)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(ggpubr)
+```
+
+# This code produces a figure of raw SR and corrected SR at three different lakes/reservoirs (oligotrophic, mesotrophic, eutrophic)
+```{r}
+
+corr <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/preds.feather") 
+
+corr <- corr %>% 
+mutate(sat = fct_relevel(sat, 
+           'LT05', 'LE07','LC08'))
+
+corr$sat[corr$sat=="l5"] <- "LT05"
+corr$sat[corr$sat=="l7"] <- "LE07"
+corr$sat[corr$sat=="l8"] <- "LC08"
+
+Boysen_corr <- corr %>% filter(Hylak_id == 9066)
+
+Boysen_corr_plot <- ggplot(Boysen_corr, aes(x = date, y = green, colour = sat)) +
+                              geom_point() + 
+                              geom_line(lwd = 0.7, alpha = 0.7)+ 
+                              scale_color_manual(values=c( '#8EA8D6','#3975B9', '#20436D')) +
+   #   xlab("Year") +
+      ylab("SR Corrected Green")+
+      #labs(title = 'Corrected SR at Yellowstone Lake (Oligotrophic)' )+
+      theme_few() +
+      theme(axis.text = element_text(colour = 'black', size = 20), axis.title = element_text(size = 20, colour = 'black'),plot.title = element_text(size = 30, colour = 'black'),
+            # plot.background = element_rect(fill = '#292b30', color = 'NA'),
+            # panel.grid.major = element_blank(),
+            #  panel.grid.minor = element_blank(), 
+            #panel.border = element_blank(),
+            #panel.background = element_rect(fill = '#292b30'),
+            #legend.background = element_rect(fill = '#292b30'), 
+            legend.position = 'none', axis.title.x = element_blank(), plot.margin = unit(c(2.5,0.5,0.5,0.5), "cm"))
+
+#Raw SR extracted from : https://zenodo.org/records/4139695
+Boysen_raw <- read_feather('C:/Users/samsi/OneDrive - Univesity of Pittsburgh/lake_productivity_trends/Data/Boysen_raw.feather') %>%
+filter(date %in% Boysen_corr$date)
+
+Boysen_raw <- Boysen_raw %>% 
+rename(index = "system.index") %>%
+    mutate(LT05 = str_extract(index, pattern = c('LT05')),
+           LE07 = str_extract(index, pattern = c('LE07')),
+           LC08 = str_extract(index, pattern = c('LC08')),
+           sat = coalesce(LT05, LE07, LC08)) %>% 
+mutate(sat = fct_relevel(sat, 
+           'LT05', 'LE07','LC08'))
+
+Boysen_raw$Green <- as.numeric(Boysen_raw$Green)
+
+Boysen_raw_plot <- ggplot(Boysen_raw, aes(x = date, y = Green, colour = sat)) +
+                           geom_point() + 
+                           geom_line(lwd = 1, alpha = 0.8)+ 
+                           scale_color_manual(values=c( '#8EA8D6','#3975B9', '#20436D')) +
+ # xlab("Year") +
+  ylab("SR Raw Green")+
+  #labs(title = 'Corrected SR at Yellowstone Lake (Oligotrophic)' )+
+  theme_few() +
+  theme(axis.text = element_text(colour = 'black', size = 20), axis.title = element_text(size = 20, colour = 'black'),plot.title = element_text(size = 30, colour = 'black'),
+        # plot.background = element_rect(fill = '#292b30', color = 'NA'),
+        # panel.grid.major = element_blank(),
+        #  panel.grid.minor = element_blank(), 
+        #panel.border = element_blank(),
+        #panel.background = element_rect(fill = '#292b30'),
+        #legend.background = element_rect(fill = '#292b30'), 
+        legend.position = 'none', axis.title.x = element_blank(), plot.margin = unit(c(2.5,0.5,0.5,0.5), "cm"))
+
+```
+
+# Placid Lake
+```{r}
+
+Placid_corr <- corr %>% filter(Hylak_id == 106142)
+
+Placid_corr_plot <- ggplot(Placid_corr, aes(x = date, y = green, colour = sat)) +
+                              geom_point() + 
+                              geom_line(lwd = 0.7, alpha = 0.7)+ 
+                              scale_color_manual(values=c( '#8EA8D6','#3975B9', '#20436D')) +
+   #   xlab("Year") +
+      ylab("SR Corrected Green")+
+      #labs(title = 'Corrected SR at Yellowstone Lake (Oligotrophic)' )+
+      theme_few() +
+      theme(axis.text = element_text(colour = 'black', size = 20), axis.title = element_text(size = 20, colour = 'black'),plot.title = element_text(size = 30, colour = 'black'),
+            # plot.background = element_rect(fill = '#292b30', color = 'NA'),
+            # panel.grid.major = element_blank(),
+            #  panel.grid.minor = element_blank(), 
+            #panel.border = element_blank(),
+            #panel.background = element_rect(fill = '#292b30'),
+            #legend.background = element_rect(fill = '#292b30'), 
+            legend.position = 'none', axis.title.x = element_blank(), plot.margin = unit(c(2.5,0.5,0.5,0.5), "cm"))
+
+#Raw SR
+Placid_raw <- read_feather('C:/Users/samsi/OneDrive - Univesity of Pittsburgh/lake_productivity_trends/Data/Placid_raw.feather') %>%
+filter(date %in% Placid_corr$date)
+
+Placid_raw <- Placid_raw %>% 
+rename(index = "system.index") %>%
+    mutate(LT05 = str_extract(index, pattern = c('LT05')),
+           LE07 = str_extract(index, pattern = c('LE07')),
+           LC08 = str_extract(index, pattern = c('LC08')),
+           sat = coalesce(LT05, LE07, LC08)) %>% 
+mutate(sat = fct_relevel(sat, 
+           'LT05', 'LE07','LC08'))
+
+Placid_raw$Green <- as.numeric(Placid_raw$Green)
+
+Placid_raw_plot <- ggplot(Placid_raw, aes(x = date, y = Green, colour = sat)) +
+                           geom_point() + 
+                           geom_line(lwd = 1, alpha = 0.8)+ 
+                           scale_color_manual(values=c( '#8EA8D6','#3975B9', '#20436D')) +
+ # xlab("Year") +
+  ylab("SR Raw Green")+
+  #labs(title = 'Corrected SR at Yellowstone Lake (Oligotrophic)' )+
+  theme_few() +
+  theme(axis.text = element_text(colour = 'black', size = 20), axis.title = element_text(size = 20, colour = 'black'),plot.title = element_text(size = 30, colour = 'black'),
+        # plot.background = element_rect(fill = '#292b30', color = 'NA'),
+        # panel.grid.major = element_blank(),
+        #  panel.grid.minor = element_blank(), 
+        #panel.border = element_blank(),
+        #panel.background = element_rect(fill = '#292b30'),
+        #legend.background = element_rect(fill = '#292b30'), 
+        axis.title.x = element_blank(), legend.position = 'none', plot.margin = unit(c(2.5,0.5,0.5,0.5), "cm"))
+
+```
+
+# Yellowstone lake
+```{r}
+Yellowstone_corr <- corr %>% filter(Hylak_id == 1045764)
+
+Yellowstone_corr_plot <- ggplot(Yellowstone_corr %>% filter(type == 'dp') , aes(x = date, y = green, colour = sat)) +
+                           geom_point() + 
+                           geom_line(lwd = 0.7, alpha = 0.8)+ 
+                           scale_color_manual(values=c( '#8EA8D6','#3975B9', '#20436D')) +
+#  xlab("Year") +
+  ylab("SR Corrected Green")+
+  #labs(title = 'Corrected SR at Yellowstone Lake (Oligotrophic)' )+
+  theme_few() +
+  theme(axis.text = element_text(colour = 'black', size = 20), axis.title = element_text(size = 20, colour = 'black'),plot.title = element_text(size = 30, colour = 'black'),
+        # plot.background = element_rect(fill = '#292b30', color = 'NA'),
+        # panel.grid.major = element_blank(),
+        #  panel.grid.minor = element_blank(), 
+        #panel.border = element_blank(),
+        #panel.background = element_rect(fill = '#292b30'),
+        #legend.background = element_rect(fill = '#292b30'), 
+        axis.title.x = element_blank(), legend.position = 'none',  plot.margin = unit(c(2.5,0.5,0.5,0.5), "cm"))
+
+
+Yellowstone_raw <- read_feather('C:/Users/samsi/OneDrive - Univesity of Pittsburgh/lake_productivity_trends/Data/Yellowstone_raw.feather')%>%
+filter(date %in% Yellowstone_corr$date)
+
+Yellowstone_raw <- Yellowstone_raw %>% 
+rename(index = "system.index") %>%
+    mutate(LT05 = str_extract(index, pattern = c('LT05')),
+           LE07 = str_extract(index, pattern = c('LE07')),
+           LC08 = str_extract(index, pattern = c('LC08')),
+           sat = coalesce(LT05, LE07, LC08)) %>% 
+mutate(sat = fct_relevel(sat, 
+           'LT05', 'LE07','LC08'))
+
+Yellowstone_raw$Green <- as.numeric(Yellowstone_raw$Green)
+
+Yellowstone_raw_plot <- ggplot(Yellowstone_raw, aes(x = date, y = Green, colour = sat)) +
+                           geom_point() + 
+                           geom_line(lwd = 1, alpha = 0.8)+ 
+                           scale_color_manual(values=c( '#8EA8D6','#3975B9', '#20436D')) +
+ # xlab("Year") +
+  ylab("SR Raw Green")+
+  #labs(title = 'Corrected SR at Yellowstone Lake (Oligotrophic)' )+
+  theme_few() +
+theme(axis.text = element_text(colour = 'black', size = 20), axis.title = element_text(size = 20, colour = 'black'),plot.title = element_text(size = 30, colour = 'black'),
+        # plot.background = element_rect(fill = '#292b30', color = 'NA'),
+        # panel.grid.major = element_blank(),
+        #  panel.grid.minor = element_blank(), 
+        #panel.border = element_blank(),
+        #panel.background = element_rect(fill = '#292b30'),
+        #legend.background = element_rect(fill = '#292b30'), 
+        axis.title.x = element_blank(), legend.position = 'none', plot.margin = unit(c(2.5,0.5,0.5,0.5), "cm"))
+
+```
+
+# Combine plots , finalize in inkscape 
+```{r}
+
+full_plot <- ggarrange(Yellowstone_raw_plot, Yellowstone_corr_plot, Placid_raw_plot, Placid_corr_plot,  Boysen_raw_plot, Boysen_corr_plot,nrow = 3, ncol = 2, align = 'v')
+
+full_plot
+
+#ggsave( "C:/Users/samsi/lake_productivity_trends/full_corr_plot.jpg", width = 12, height = 12.5, unit = 'in')
+
+```

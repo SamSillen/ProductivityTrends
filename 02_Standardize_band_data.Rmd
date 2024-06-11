@@ -1,5 +1,5 @@
 ---
-title: "standarize"
+title: "standarize band data"
 author: "S. Sillen"
 date: '2023-02-17'
 output: html_document
@@ -14,8 +14,7 @@ library(broom)
 library(feather)
 ```
 
-
-# 1) Get correction coefficients 
+Get correction coefficients (SR correction based on Gardner et al (2021) https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2020GL088946)
 ```{r}
 
 data <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/LimnoSat/LimnoSat_20200628.feather") %>% 
@@ -30,7 +29,6 @@ data <- read_feather("C:/Users/samsi/OneDrive - University of Pittsburgh/LimnoSa
 
 data$sat <- as.character(data$sat)
 
-# bands are quite different but dw is not 
 sr_57 <- data %>%
   filter(sat %in% c("l7", "l5")) %>%
   filter(date > "1999-01-01" & date < "2012-05-01" ) %>%
@@ -38,13 +36,6 @@ sr_57 <- data %>%
   filter(n_years > 10) %>%
   select(Hylak_id, date, sat, count, n_years, Blue, Red, Green, Nir, Swir1, Swir2) %>%
   gather(Blue, Red, Green, Nir, Swir1, Swir2, key='band', value='value') 
-
-# plot distribution compare means
-# ggplot(data=sr_57, aes(x=value, color=sat)) +
-#   geom_density() +
-#   facet_wrap(~band, scales="free")
-
-
 
 # do ranking plotting percentiles, joining, and correcting
 sr_57_rank  <- sr_57 %>%
@@ -67,7 +58,7 @@ sr_57_rank  <- sr_57 %>%
                group_by(band) %>%
                nest() %>%
                mutate( ret = purrr::map(data, ~quantile(.$value, probs = seq(0,1,0.01))),
-                       ret = purrr::invoke_map(tibble, ret)) %>%
+               ret = purrr::invoke_map(tibble, ret)) %>%
                unnest(ret) %>%
                dplyr::select(-data) %>%
                pivot_longer(
@@ -97,15 +88,6 @@ poly_57 <- sr_57_rank %>%
   mutate( pred_all = purrr::map2(model_all, data, predict)) %>%
   unnest(c(pred, pred_all, data))  %>%
   dplyr::select(-model, -model_all)
-
-ggplot(poly_57) +
-   geom_point( aes(x=value_5, y= value_7))+
-   geom_point( aes(x=pred_all, y= value_7), color="red", alpha=0.5)+
-   geom_point( aes(x=pred, y= value_7), color="blue", alpha=0.5)+
-   geom_abline(aes(slope=1, intercept=0)) +
-   facet_wrap(~band, scales="free") +
-  theme_bw() 
-
 
 coef_5 <- sr_57_rank %>%
   ungroup() %>%
@@ -148,11 +130,6 @@ sr_78 <- data %>%
   filter(n_years > 10) %>%
   select(Hylak_id, date, sat, count, n_years, Blue, Red, Green, Nir, Swir1, Swir2) %>%
   gather(Blue, Red, Green, Nir, Swir1, Swir2, key='band', value='value') 
-
-# plot distribution compare means
-# ggplot(data=sr_78, aes(x=value, color=sat)) +
-#   geom_density() +
-#   facet_wrap(~band, scales="free")
 
 # do ranking plotting percentiles, joining, and correcting
 sr_78_rank  <- sr_78 %>%
@@ -205,14 +182,6 @@ poly_78 <- sr_78_rank %>%
   unnest(c(pred, pred_all, data)) %>%
   dplyr::select(-model, -model_all)
 
-ggplot(poly_78) +
-  geom_point( aes(x=value_8, y= value_7))+
-  geom_point( aes(x=pred_all, y= value_7), color="red", alpha=0.5)+
-  geom_point( aes(x=pred, y= value_7), color="blue", alpha=0.5)+
-  geom_abline(aes(slope=1, intercept=0)) +
-  facet_wrap(~band, scales="free") +
-  theme_bw()
-
 coef_8 <- sr_78_rank %>%
   ungroup() %>%
   filter(!quant %in% c(0, 1)) %>%
@@ -228,7 +197,6 @@ coef_8 <- sr_78_rank %>%
   mutate(sat = "8") %>%
   mutate(fit = "98_quant")
 
-#
 coef_8_all <- sr_78_rank %>%
   ungroup() %>%
   group_by(band)  %>%
@@ -243,19 +211,19 @@ coef_8_all <- sr_78_rank %>%
   mutate(sat = "8") %>%
   mutate(fit = "all_quant")
 
-#
+
 coef_7 <- tibble(band = c("Blue", "Red", "Green", "Nir", "Swir1", "Swir2"), intercept = 0, coef1=1, coef2=0, sat= "7")
 
-#
+
 corr_coef <- bind_rows(coef_5, coef_7, coef_8, coef_5_all, coef_8_all) %>%
   ungroup()
 
-write.csv(corr_coef, "C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/Data/corr_coef_aquasat_filtered.csv", row.names = FALSE)
+write.csv(corr_coef, "C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/corr_coef.csv", row.names = FALSE)
 ```  
 
-# 2) Add corrected band values to training set 
+Add corrected band values to training set 
 ```{r}
-training <- read_csv("C:/Users/samsi/OneDrive - University of Pittsburgh/WesternMountainsChlPreds/data/training_raw.csv") 
+training <- read_csv("C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/training_final.csv") 
 
 correction_coef_99 <- corr_coef %>%
   filter(fit %in% c(NA, "98_quant")) %>%
@@ -279,7 +247,5 @@ training <- training %>%
     rename_at(vars(red, green, blue, nir, swir1, swir2),function(x) paste0(x,"_raw")) %>%
     rename_at(vars(starts_with("cor")),            funs(stringr::str_replace_all(., "cor_", ""))) 
 
-write.csv(training, "data/training_Standardized.csv", row.names = FALSE)
+write.csv(training, "C:/Users/samsi/OneDrive - University of Pittsburgh/lake_productivity_trends/Data/training_standardized.csv", row.names = FALSE)
 ```
-
-
